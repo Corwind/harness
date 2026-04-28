@@ -116,38 +116,167 @@ fn build_event_stream(
     s.boxed()
 }
 
+/// Build the SSE record for a `RunEvent`. Names + data shapes are the
+/// canonical wire form documented in `spec/events.md`; we do **not**
+/// just `serde_json::to_string(&event)` here because:
+///
+/// * The internal `#[serde(tag = "type", ...)]` on `RunEvent` and
+///   `ChatEvent` adds a `type` field the spec doesn't have.
+/// * `RunEvent::Chat { event: ChatEvent }` would nest the inner
+///   payload under `data.event.*` instead of carrying its fields at
+///   the top level.
+///
+/// Building the JSON explicitly per variant keeps the wire shape
+/// stable independently of how `RunEvent` evolves internally.
 fn to_sse_event(sequenced: &SequencedEvent) -> Event {
-    let name = event_name(&sequenced.event);
-    let data = serde_json::to_string(&sequenced.event)
-        .unwrap_or_else(|_| String::from("{\"error\":\"serialise\"}"));
+    let (name, data) = render(&sequenced.event);
     Event::default()
         .id(sequenced.seq.to_string())
         .event(name)
         .data(data)
 }
 
-/// Map `RunEvent` to the stable SSE event name surfaced to clients. The
-/// names are also documented in `spec/events.md` (TODO: write that file
-/// in a follow-up; the names below are the source of truth for now).
-fn event_name(e: &RunEvent) -> &'static str {
-    match e {
-        RunEvent::RunStart { .. } => "run.start",
-        RunEvent::RunEnd { .. } => "run.end",
-        RunEvent::ToolStart { .. } => "tool.start",
-        RunEvent::ToolStdout { .. } => "tool.stdout",
-        RunEvent::ToolStderr { .. } => "tool.stderr",
-        RunEvent::ToolFinish { .. } => "tool.finish",
-        RunEvent::ToolError { .. } => "tool.error",
-        RunEvent::Chat { event } => match event {
-            harness_core::ChatEvent::MessageStart { .. } => "chat.message_start",
-            harness_core::ChatEvent::ContentDelta { .. } => "chat.content_delta",
-            harness_core::ChatEvent::ToolUseStart { .. } => "chat.tool_use_start",
-            harness_core::ChatEvent::ToolUseDelta { .. } => "chat.tool_use_delta",
-            harness_core::ChatEvent::ToolUseStop { .. } => "chat.tool_use_stop",
-            harness_core::ChatEvent::MessageStop { .. } => "chat.message_stop",
-            harness_core::ChatEvent::Error { .. } => "chat.error",
-        },
+/// Render a `RunEvent` into `(spec-name, single-line-JSON-payload)`.
+fn render(event: &RunEvent) -> (&'static str, String) {
+    match event {
+        RunEvent::RunStart {
+            run_id,
+            conversation_id,
+            started_at,
+        } => (
+            "run.start",
+            serde_json::to_string(&serde_json::json!({
+                "run_id": run_id,
+                "conversation_id": conversation_id,
+                "started_at": started_at,
+            }))
+            .unwrap_or_else(|_| serialise_fallback()),
+        ),
+        RunEvent::RunEnd {
+            run_id,
+            status,
+            ended_at,
+        } => (
+            "run.end",
+            serde_json::to_string(&serde_json::json!({
+                "run_id": run_id,
+                "status": status,
+                "ended_at": ended_at,
+            }))
+            .unwrap_or_else(|_| serialise_fallback()),
+        ),
+        RunEvent::ToolStart {
+            tool_use_id,
+            name,
+            input,
+        } => (
+            "tool.start",
+            serde_json::to_string(&serde_json::json!({
+                "tool_use_id": tool_use_id,
+                "name": name,
+                "input": input,
+            }))
+            .unwrap_or_else(|_| serialise_fallback()),
+        ),
+        RunEvent::ToolStdout { tool_use_id, chunk } => (
+            "tool.stdout",
+            serde_json::to_string(&serde_json::json!({
+                "tool_use_id": tool_use_id,
+                "chunk": chunk,
+            }))
+            .unwrap_or_else(|_| serialise_fallback()),
+        ),
+        RunEvent::ToolStderr { tool_use_id, chunk } => (
+            "tool.stderr",
+            serde_json::to_string(&serde_json::json!({
+                "tool_use_id": tool_use_id,
+                "chunk": chunk,
+            }))
+            .unwrap_or_else(|_| serialise_fallback()),
+        ),
+        RunEvent::ToolFinish {
+            tool_use_id,
+            name,
+            output,
+        } => (
+            "tool.finish",
+            serde_json::to_string(&serde_json::json!({
+                "tool_use_id": tool_use_id,
+                "name": name,
+                "output": output,
+            }))
+            .unwrap_or_else(|_| serialise_fallback()),
+        ),
+        RunEvent::ToolError {
+            tool_use_id,
+            name,
+            code,
+            message,
+        } => (
+            "tool.error",
+            serde_json::to_string(&serde_json::json!({
+                "tool_use_id": tool_use_id,
+                "name": name,
+                "code": code,
+                "message": message,
+            }))
+            .unwrap_or_else(|_| serialise_fallback()),
+        ),
+        RunEvent::Chat { event } => render_chat(event),
     }
+}
+
+fn render_chat(event: &harness_core::ChatEvent) -> (&'static str, String) {
+    use harness_core::ChatEvent;
+    match event {
+        ChatEvent::MessageStart { id } => (
+            "message.start",
+            serde_json::to_string(&serde_json::json!({ "id": id }))
+                .unwrap_or_else(|_| serialise_fallback()),
+        ),
+        ChatEvent::ContentDelta { text } => (
+            "content.delta",
+            serde_json::to_string(&serde_json::json!({ "text": text }))
+                .unwrap_or_else(|_| serialise_fallback()),
+        ),
+        ChatEvent::ToolUseStart { id, name } => (
+            "tool_use.start",
+            serde_json::to_string(&serde_json::json!({ "id": id, "name": name }))
+                .unwrap_or_else(|_| serialise_fallback()),
+        ),
+        ChatEvent::ToolUseDelta { id, partial_json } => (
+            "tool_use.delta",
+            serde_json::to_string(&serde_json::json!({
+                "id": id,
+                "partial_json": partial_json,
+            }))
+            .unwrap_or_else(|_| serialise_fallback()),
+        ),
+        ChatEvent::ToolUseStop { id, input } => (
+            "tool_use.stop",
+            serde_json::to_string(&serde_json::json!({ "id": id, "input": input }))
+                .unwrap_or_else(|_| serialise_fallback()),
+        ),
+        ChatEvent::MessageStop { stop_reason, usage } => {
+            let mut body = serde_json::json!({ "stop_reason": stop_reason });
+            if let Some(u) = usage {
+                body["usage"] = serde_json::to_value(u).unwrap_or(serde_json::Value::Null);
+            }
+            (
+                "message.stop",
+                serde_json::to_string(&body).unwrap_or_else(|_| serialise_fallback()),
+            )
+        }
+        ChatEvent::Error { message } => (
+            "error",
+            serde_json::to_string(&serde_json::json!({ "message": message }))
+                .unwrap_or_else(|_| serialise_fallback()),
+        ),
+    }
+}
+
+fn serialise_fallback() -> String {
+    String::from("{\"error\":\"serialise\"}")
 }
 
 async fn cancel(

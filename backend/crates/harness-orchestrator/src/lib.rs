@@ -106,10 +106,12 @@ impl Orchestrator {
             mut request,
         } = opts;
 
+        let started_at = chrono::Utc::now();
         if tx
             .send(RunEvent::RunStart {
                 run_id: run_id.clone(),
                 conversation_id: conversation_id.clone(),
+                started_at,
             })
             .await
             .is_err()
@@ -127,7 +129,13 @@ impl Orchestrator {
             )
             .await;
 
-        let _ = tx.send(RunEvent::RunEnd { status }).await;
+        let _ = tx
+            .send(RunEvent::RunEnd {
+                run_id: run_id.clone(),
+                status,
+                ended_at: chrono::Utc::now(),
+            })
+            .await;
     }
 
     /// Inner loop. Returns the terminal status.

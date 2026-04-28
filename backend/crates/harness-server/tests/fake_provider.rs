@@ -7,7 +7,7 @@
 //! 2. POSTing a vanilla user message yields content.delta carrying
 //!    "Hello from fake provider.".
 //! 3. POSTing a message containing "echo: hi" yields the full sequence
-//!    `chat.tool_use_start` → `tool.start` → `tool.finish` → final
+//!    `tool_use.start` → `tool.start` → `tool.finish` → final
 //!    assistant text quoting "hi".
 //!
 //! A fourth covers the env knob's parser (`fake_provider_enabled`).
@@ -297,11 +297,11 @@ async fn vanilla_message_emits_canned_greeting_via_sse() {
 
     let events = collect_run_events(&handle, &run_id, Duration::from_secs(3)).await;
 
-    // RunEvent::Chat serialises as `{"type":"chat","event":{...}}`,
-    // so the inner ChatEvent fields live under `data["event"]`.
+    // Per spec/events.md the SSE event name is `content.delta` and the
+    // payload is flat — `data.text` rather than `data.event.text`.
     let greeting = events.iter().find_map(|(name, data, _)| {
-        if name == "chat.content_delta" {
-            data["event"]["text"].as_str().map(str::to_owned)
+        if name == "content.delta" {
+            data["text"].as_str().map(str::to_owned)
         } else {
             None
         }
@@ -334,8 +334,8 @@ async fn echo_substring_invokes_tool_and_quotes_output() {
     let names: Vec<&str> = events.iter().map(|(n, _, _)| n.as_str()).collect();
 
     assert!(
-        names.contains(&"chat.tool_use_start"),
-        "missing chat.tool_use_start: {names:?}"
+        names.contains(&"tool_use.start"),
+        "missing tool_use.start: {names:?}"
     );
     assert!(
         names.contains(&"tool.start"),
@@ -346,11 +346,11 @@ async fn echo_substring_invokes_tool_and_quotes_output() {
         "missing tool.finish: {names:?}"
     );
 
-    // Final assistant text must quote "hi". Same nested-shape note as
-    // above: `chat.*` events carry their fields under `data["event"]`.
+    // Final assistant text must quote "hi". Per spec/events.md the
+    // payload is flat: `data.text`.
     let assistant_quote = events.iter().rev().find_map(|(n, d, _)| {
-        if n == "chat.content_delta" {
-            d["event"]["text"].as_str().map(str::to_owned)
+        if n == "content.delta" {
+            d["text"].as_str().map(str::to_owned)
         } else {
             None
         }

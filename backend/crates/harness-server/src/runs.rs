@@ -171,7 +171,7 @@ impl RunRegistry {
         // Broadcast errors when there are no subscribers — that's fine.
         let _ = entry.sender.send(sequenced);
 
-        if let RunEvent::RunEnd { status } = event {
+        if let RunEvent::RunEnd { status, .. } = event {
             entry.lifecycle = RunLifecycle::Terminated {
                 status,
                 at: Instant::now(),

@@ -267,10 +267,51 @@ async fn happy_path_run_persists_assistant_message() {
         events.iter().any(|(n, _, _)| n == "run.end"),
         "expected run.end in {events:?}"
     );
+
+    // Spec contract: run.start carries a non-empty RFC 3339 `started_at`.
+    let run_start = events.iter().find(|(n, _, _)| n == "run.start").unwrap();
+    let started_at = run_start
+        .1
+        .get("started_at")
+        .and_then(|s| s.as_str())
+        .expect("run.start must include started_at");
+    chrono::DateTime::parse_from_rfc3339(started_at)
+        .unwrap_or_else(|e| panic!("started_at {started_at:?} not RFC 3339: {e}"));
+
     let run_end = events.iter().find(|(n, _, _)| n == "run.end").unwrap();
     assert_eq!(
         run_end.1.get("status").and_then(|s| s.as_str()),
         Some("completed")
+    );
+    // Spec contract: run.end mirrors started_at with `ended_at` and
+    // echoes the run_id for late-joining listeners.
+    let ended_at = run_end
+        .1
+        .get("ended_at")
+        .and_then(|s| s.as_str())
+        .expect("run.end must include ended_at");
+    chrono::DateTime::parse_from_rfc3339(ended_at)
+        .unwrap_or_else(|e| panic!("ended_at {ended_at:?} not RFC 3339: {e}"));
+    assert_eq!(
+        run_end.1.get("run_id").and_then(|s| s.as_str()),
+        Some(run_id.as_str()),
+        "run.end run_id must echo the run that started"
+    );
+
+    // Pin the spec's chat-event names so contract drift is caught on
+    // every CI run, not just by swift-chat at integration time.
+    let names: Vec<&str> = events.iter().map(|(n, _, _)| n.as_str()).collect();
+    assert!(
+        names.contains(&"message.start"),
+        "expected message.start: {names:?}"
+    );
+    assert!(
+        names.contains(&"content.delta"),
+        "expected content.delta: {names:?}"
+    );
+    assert!(
+        names.contains(&"message.stop"),
+        "expected message.stop: {names:?}"
     );
 
     // Allow the mirror task a tick to commit the assistant message.

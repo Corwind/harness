@@ -32,7 +32,7 @@ async fn collect_events(
 
 fn first_run_status(events: &[RunEvent]) -> Option<RunStatus> {
     events.iter().rev().find_map(|e| match e {
-        RunEvent::RunEnd { status } => Some(*status),
+        RunEvent::RunEnd { status, .. } => Some(*status),
         _ => None,
     })
 }
@@ -270,7 +270,8 @@ async fn cancellation_terminates_within_100ms() {
     assert!(matches!(
         last,
         Some(RunEvent::RunEnd {
-            status: RunStatus::Cancelled
+            status: RunStatus::Cancelled,
+            ..
         })
     ));
     // Cancellation budget: token fires at ~20ms, RunEnd within ~100ms

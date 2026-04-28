@@ -10,6 +10,7 @@
 //! and tool-execution events (`ToolStart`, `ToolStdout`, `ToolStderr`,
 //! `ToolFinish`, `ToolError`). Wire-format mapping is the server's job.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::chat::ChatEvent;
@@ -37,10 +38,14 @@ pub enum RunStatus {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RunEvent {
-    /// First event. Identifies the run and its conversation.
+    /// First event. Identifies the run and its conversation, and
+    /// records the wall-clock moment the orchestrator accepted the
+    /// run. The HTTP layer surfaces `started_at` as an RFC 3339
+    /// timestamp on the wire (see `spec/events.md`).
     RunStart {
         run_id: RunId,
         conversation_id: ConversationId,
+        started_at: DateTime<Utc>,
     },
 
     /// A provider event passed through verbatim. Includes message
@@ -86,8 +91,14 @@ pub enum RunEvent {
         message: String,
     },
 
-    /// Terminal event for the run.
-    RunEnd { status: RunStatus },
+    /// Terminal event for the run. Carries the matching `run_id` so a
+    /// listener that joins late (or drops a prefix) can still
+    /// disambiguate which run finished.
+    RunEnd {
+        run_id: RunId,
+        status: RunStatus,
+        ended_at: DateTime<Utc>,
+    },
 }
 
 impl RunEvent {
