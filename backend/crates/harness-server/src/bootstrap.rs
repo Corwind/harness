@@ -7,6 +7,16 @@
 //! (`BUILTIN_STRICT_READONLY`, …), so re-running on every startup is safe
 //! and keeps drifted bundled profiles in sync.
 //!
+//! ## Runtime knobs
+//!
+//! * `HARNESS_FAKE_PROVIDER=1` — register the deterministic
+//!   [`crate::testing::FakeProvider`] under provider id `"claude"`
+//!   instead of the real `ClaudeProvider`. Used by Swift-side e2e tests
+//!   (T2.1, T2.2). The fake still requires a stored config row (any
+//!   non-empty `api_key` will do) so the configured/unconfigured
+//!   semantics match the production path. A warning is logged at
+//!   startup.
+//!
 //! Behavior tests can either:
 //! * drive `seed_builtin_sandbox_templates` directly (still public), or
 //! * use the lower-level [`acquire_app_state_with`] constructor that
@@ -25,7 +35,14 @@ use harness_storage::{
 };
 use harness_tools::default_registry;
 
-use crate::{auth::SessionToken, providers::ProviderRegistry, runs::RunRegistry, state::AppState};
+use crate::{
+    auth::SessionToken, providers::ProviderRegistry, runs::RunRegistry, state::AppState,
+    testing::FakeProvider,
+};
+
+/// Env var that swaps the production Claude provider for the
+/// deterministic [`FakeProvider`]. Set to `"1"` to enable.
+pub const ENV_FAKE_PROVIDER: &str = "HARNESS_FAKE_PROVIDER";
 
 /// Upsert the four built-in templates from `harness-sandbox`. Returns the
 /// number of templates seeded (always 4 today; surfaced for tests).
@@ -38,27 +55,41 @@ pub async fn seed_builtin_sandbox_templates(
     Ok(n)
 }
 
-/// Build a complete [`AppState`] for production: real Claude provider,
-/// real `SbxRunner`, real default tool registry.
+/// Build a complete [`AppState`] for production.
+///
+/// Honours the [`ENV_FAKE_PROVIDER`] runtime knob: when set to `"1"`,
+/// the registered "claude" provider is the deterministic
+/// [`FakeProvider`] from this crate. The configured/unconfigured
+/// semantics still apply — operators (or Swift e2e tests) must POST a
+/// config to `/v1/providers/claude/config` before models / runs work,
+/// which keeps this seam consistent with the real-provider path.
 pub async fn acquire_app_state(db: Db, token: SessionToken) -> Result<AppState, anyhow::Error> {
-    let claude: Arc<dyn LlmProvider> = Arc::new(ClaudeProvider::new());
-    let providers = Arc::new(ProviderRegistry::new().with(claude.clone()));
+    let provider: Arc<dyn LlmProvider> = if fake_provider_enabled() {
+        tracing::warn!(
+            env = ENV_FAKE_PROVIDER,
+            "{} is set; registering FakeProvider under id 'claude' (NOT for production)",
+            ENV_FAKE_PROVIDER
+        );
+        Arc::new(FakeProvider::new())
+    } else {
+        Arc::new(ClaudeProvider::new())
+    };
+    let providers = Arc::new(ProviderRegistry::new().with(provider.clone()));
     let sandbox_runner: Arc<dyn SandboxRunner> = Arc::new(SbxRunner::new()?);
     let tools: Arc<dyn ToolRegistry> = default_registry();
-    // Orchestrator uses the *first* provider for now. Per-conversation
-    // routing (different providers in the same backend) lands in T1.E's
-    // follow-up: the message-post handler resolves the right provider
-    // by id from the registry, but the orchestrator currently captures
-    // a single `Arc<dyn LlmProvider>`. We pass Claude here as the
-    // production default; T1.E tests use a fake injected via
-    // `acquire_app_state_with`.
     let orchestrator = Arc::new(Orchestrator::new(
-        claude,
+        provider,
         sandbox_runner.clone(),
         tools.clone(),
     ));
 
     acquire_app_state_with(db, token, providers, sandbox_runner, tools, orchestrator).await
+}
+
+/// Returns `true` when the env var [`ENV_FAKE_PROVIDER`] is set to
+/// exactly `"1"`. Any other value (including unset) returns `false`.
+pub fn fake_provider_enabled() -> bool {
+    matches!(std::env::var(ENV_FAKE_PROVIDER).as_deref(), Ok("1"))
 }
 
 /// Build an [`AppState`] from a pre-built provider registry / runner /

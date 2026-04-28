@@ -35,6 +35,7 @@ pub mod routes;
 pub mod runs;
 pub mod server;
 pub mod state;
+pub mod testing;
 
 pub use auth::{SessionToken, TOKEN_HEADER};
 pub use bootstrap::seed_builtin_sandbox_templates;
@@ -43,3 +44,4 @@ pub use providers::ProviderRegistry;
 pub use runs::{RunRegistry, RUN_RETENTION};
 pub use server::{bind_loopback, build_router, serve, BoundServer, ServerConfig};
 pub use state::AppState;
+pub use testing::FakeProvider;
