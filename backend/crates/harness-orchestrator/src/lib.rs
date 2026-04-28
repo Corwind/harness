@@ -1,7 +1,10 @@
-//! `harness-orchestrator` — drives a conversation turn.
+//! `harness-orchestrator` — application layer: drives a conversation turn.
 //!
-//! Loops `LlmProvider::chat()` ↔ tool execution; emits a unified `RunEvent`
-//! stream consumed by the HTTP/SSE layer. Owns cancellation semantics and
-//! ensures every `ExternalTool` invocation is wrapped via `harness-sandbox`.
+//! Loops `LlmProvider::chat()` ↔ tool execution and emits a unified `RunEvent`
+//! stream. Owns cancellation semantics and asks the injected `SandboxRunner`
+//! port to wrap every `ExternalTool` invocation.
+//!
+//! Hexagonal: this crate depends on `harness-core` ports ONLY. The
+//! composition root (`harness-server`) injects concrete adapters.
 //!
 //! Filled in by Phase 1 / track D.

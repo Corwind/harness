@@ -7,8 +7,10 @@ rust-version.workspace = true
 description = "Tool trait + built-in tools."
 
 [dependencies]
+# Adapter crate: implements the `Tool` port from harness-core with built-in
+# tool implementations. Sandboxing is applied by the orchestrator at invocation
+# time, not here.
 harness-core.workspace = true
-harness-sandbox.workspace = true
 
 async-trait.workspace = true
 tokio.workspace = true
