@@ -13,6 +13,7 @@ public struct SandboxTemplatesGatewayAdapter: SandboxTemplatesGateway {
 
     private struct ValidateResponse: Decodable {
         let valid: Bool
+        let stderr: String?
     }
 
     public func list() async throws -> [SandboxTemplate] {
@@ -42,8 +43,9 @@ public struct SandboxTemplatesGatewayAdapter: SandboxTemplatesGateway {
         try await client.sendNoContent(request)
     }
 
-    public func validate(id: String) async throws -> Bool {
+    public func validate(id: String) async throws -> ValidateSandboxResult {
         let request = client.makeRequest(method: "POST", path: "/v1/sandbox-templates/\(id)/validate")
-        return try await client.send(request, as: ValidateResponse.self).valid
+        let response = try await client.send(request, as: ValidateResponse.self)
+        return ValidateSandboxResult(valid: response.valid, stderr: response.stderr)
     }
 }

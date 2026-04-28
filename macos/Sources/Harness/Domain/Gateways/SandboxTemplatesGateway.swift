@@ -6,5 +6,5 @@ public protocol SandboxTemplatesGateway: Sendable {
     func get(id: String) async throws -> SandboxTemplate
     func patch(id: String, _ request: PatchSandboxTemplateRequest) async throws -> SandboxTemplate
     func delete(id: String) async throws
-    func validate(id: String) async throws -> Bool
+    func validate(id: String) async throws -> ValidateSandboxResult
 }

@@ -4,23 +4,30 @@ import XCTest
 @MainActor
 final class ThemeTests: XCTestCase {
     // T1.J behavior 1 — semantic-token coverage:
-    // The Settings views (and chat MessageBubble when it lands) must read every color
-    // from the theme — no `Color.red`, `Color.blue`, etc. literals. We grep our own
-    // sources to enforce this without depending on T1.H landing first.
+    // The Settings + Sandboxes views (and chat MessageBubble when it lands)
+    // must read every color from the theme — no `Color.red`, `Color.blue`,
+    // etc. literals. We grep our own sources to enforce this.
     func testSettingsViewsUseOnlyThemeColors() throws {
-        let settingsRoot = Self.repoRoot()
-            .appendingPathComponent("Sources/Harness/UI/Settings", isDirectory: true)
-        let urls = try filesIn(settingsRoot, withSuffix: ".swift")
-        XCTAssertFalse(urls.isEmpty, "Expected at least one file under UI/Settings/")
-        for url in urls {
-            let source = try String(contentsOf: url, encoding: .utf8)
-            for forbidden in Self.forbiddenColorLiterals {
-                XCTAssertFalse(
-                    source.contains(forbidden),
-                    "\(url.lastPathComponent) uses forbidden color literal '\(forbidden)' — read from the Theme instead"
-                )
+        let root = Self.repoRoot()
+        let dirs = [
+            root.appendingPathComponent("Sources/Harness/UI/Settings", isDirectory: true),
+            root.appendingPathComponent("Sources/Harness/UI/Sandboxes", isDirectory: true),
+        ]
+        var sawAtLeastOne = false
+        for dir in dirs {
+            let urls = try filesIn(dir, withSuffix: ".swift")
+            for url in urls {
+                sawAtLeastOne = true
+                let source = try String(contentsOf: url, encoding: .utf8)
+                for forbidden in Self.forbiddenColorLiterals {
+                    XCTAssertFalse(
+                        source.contains(forbidden),
+                        "\(url.lastPathComponent) uses forbidden color literal '\(forbidden)' — read from the Theme instead"
+                    )
+                }
             }
         }
+        XCTAssertTrue(sawAtLeastOne, "Expected at least one file under UI/Settings/ or UI/Sandboxes/")
     }
 
     // T1.J behavior 2 — live theme switch:

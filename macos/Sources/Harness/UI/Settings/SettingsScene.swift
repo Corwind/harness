@@ -2,14 +2,16 @@ import SwiftUI
 
 public struct SettingsScene: Scene {
     @Bindable private var viewModel: SettingsViewModel
+    private let sandboxes: SandboxTemplatesViewModel?
 
-    public init(viewModel: SettingsViewModel) {
+    public init(viewModel: SettingsViewModel, sandboxes: SandboxTemplatesViewModel? = nil) {
         self.viewModel = viewModel
+        self.sandboxes = sandboxes
     }
 
     public var body: some Scene {
         SwiftUI.Settings {
-            SettingsRoot(viewModel: viewModel)
+            SettingsRoot(viewModel: viewModel, sandboxes: sandboxes)
                 .frame(minWidth: 720, minHeight: 480)
                 .theme(viewModel.currentTheme)
                 .task {
@@ -36,14 +38,16 @@ struct SettingsHostScene: Scene {
 private struct SettingsHost: View {
     let state: BootstrapState
     @State private var viewModel: SettingsViewModel?
+    @State private var sandboxes: SandboxTemplatesViewModel?
 
     var body: some View {
         Group {
             if let viewModel {
-                SettingsRoot(viewModel: viewModel)
+                SettingsRoot(viewModel: viewModel, sandboxes: sandboxes)
                     .theme(viewModel.currentTheme)
                     .task {
                         await viewModel.load()
+                        await sandboxes?.load()
                     }
             } else {
                 VStack(spacing: 12) {
@@ -56,27 +60,31 @@ private struct SettingsHost: View {
         }
         .onChange(of: state.session) { _, newSession in
             if viewModel == nil, let session = newSession {
-                viewModel = Self.makeViewModel(session: session)
+                instantiate(session: session)
             }
         }
         .onAppear {
             if viewModel == nil, let session = state.session {
-                viewModel = Self.makeViewModel(session: session)
+                instantiate(session: session)
             }
         }
     }
 
-    private static func makeViewModel(session: BackendSession) -> SettingsViewModel {
+    private func instantiate(session: BackendSession) {
         let client = HTTPClient(baseURL: session.baseURL, token: session.token)
-        return SettingsViewModel(
+        viewModel = SettingsViewModel(
             settings: SettingsGatewayAdapter(client: client),
             providers: ProvidersGatewayAdapter(client: client)
+        )
+        sandboxes = SandboxTemplatesViewModel(
+            gateway: SandboxTemplatesGatewayAdapter(client: client)
         )
     }
 }
 
 struct SettingsRoot: View {
     @Bindable var viewModel: SettingsViewModel
+    let sandboxes: SandboxTemplatesViewModel?
 
     var body: some View {
         TabView {
@@ -86,6 +94,11 @@ struct SettingsRoot: View {
                 .tabItem { Label("Providers", systemImage: "cloud") }
             ModelsTab(viewModel: viewModel)
                 .tabItem { Label("Models", systemImage: "brain") }
+            if let sandboxes {
+                SandboxesTab(viewModel: sandboxes)
+                    .theme(viewModel.currentTheme)
+                    .tabItem { Label("Sandboxes", systemImage: "shield.lefthalf.filled") }
+            }
         }
         .background(viewModel.currentTheme.background)
     }

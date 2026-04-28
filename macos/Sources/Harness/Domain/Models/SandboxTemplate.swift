@@ -61,3 +61,19 @@ public struct PatchSandboxTemplateRequest: Codable, Sendable, Equatable {
         self.profile = profile
     }
 }
+
+/// Result of a `POST /v1/sandbox-templates/{id}/validate` call.
+///
+/// The server returns `200 {valid: true}` on success and `200 {valid: false,
+/// stderr: "..."}` when the profile is malformed (per the T1.L brief — the
+/// UI needs the diagnostic to render inline). HTTP-level errors map to
+/// thrown gateway errors.
+public struct ValidateSandboxResult: Codable, Sendable, Equatable {
+    public let valid: Bool
+    public let stderr: String?
+
+    public init(valid: Bool, stderr: String? = nil) {
+        self.valid = valid
+        self.stderr = stderr
+    }
+}
