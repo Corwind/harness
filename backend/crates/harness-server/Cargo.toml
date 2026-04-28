@@ -1,0 +1,43 @@
+[package]
+name = "harness-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "HTTP+SSE server binary for Harness."
+
+[[bin]]
+name = "harness-server"
+path = "src/main.rs"
+
+[dependencies]
+harness-core.workspace = true
+harness-storage.workspace = true
+harness-orchestrator.workspace = true
+harness-tools.workspace = true
+harness-sandbox.workspace = true
+harness-providers.workspace = true
+
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+uuid.workspace = true
+once_cell.workspace = true
+bytes.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true
+eventsource-stream.workspace = true
+tempfile.workspace = true
+pretty_assertions.workspace = true

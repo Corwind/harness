@@ -1,0 +1,36 @@
+# xcodegen project descriptor for the Harness macOS .app target.
+# Run `xcodegen generate` from this directory to (re)materialise Harness.xcodeproj.
+# Authored by Phase 1 / track F; this is a starting skeleton.
+
+name: Harness
+options:
+  bundleIdPrefix: com.harness
+  deploymentTarget:
+    macOS: "14.0"
+  developmentLanguage: en
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    ENABLE_HARDENED_RUNTIME: YES
+
+targets:
+  Harness:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/Harness
+        excludes:
+          - "**/*.md"
+    resources:
+      - Sources/Harness/Resources
+    info:
+      path: Sources/Harness/Resources/Info.plist
+      properties:
+        CFBundleName: Harness
+        LSMinimumSystemVersion: "14.0"
+        NSHighResolutionCapable: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.harness.Harness
+        CODE_SIGN_STYLE: Automatic

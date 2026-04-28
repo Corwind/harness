@@ -1,0 +1,7 @@
+# Placeholder — to be authored by Phase 0 track B.
+# See PLAN.md §5.2 for the target endpoints.
+openapi: 3.1.0
+info:
+  title: Harness Local API
+  version: 0.0.0-placeholder
+paths: {}

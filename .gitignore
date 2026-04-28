@@ -1,0 +1,40 @@
+# Rust
+/backend/target
+/backend/**/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# Swift / Xcode
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.xcworkspace/xcuserdata
+macos/Harness.xcodeproj/
+macos/Harness.xcworkspace/
+
+# macOS
+.DS_Store
+*.swp
+*.swo
+
+# Build outputs
+/dist/
+/out/
+*.app/
+
+# Editor
+.idea/
+.vscode/
+*.iml
+
+# Env / secrets
+.env
+.env.local
+*.pem
+*.p12
+
+# Logs
+*.log

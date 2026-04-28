@@ -1,0 +1,73 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/harness-core",
+    "crates/harness-server",
+    "crates/harness-storage",
+    "crates/harness-orchestrator",
+    "crates/harness-tools",
+    "crates/harness-sandbox",
+    "crates/harness-providers",
+    "crates/harness-providers-claude",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/guillaumedore/harness"
+rust-version = "1.75"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# HTTP server / client
+axum = { version = "0.7", features = ["macros"] }
+tower = "0.5"
+tower-http = { version = "0.5", features = ["trace", "cors"] }
+hyper = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+eventsource-stream = "0.2"
+
+# Serialisation
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Storage
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate", "chrono"] }
+
+# Errors / logs
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+
+# Misc
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+bytes = "1"
+once_cell = "1"
+tempfile = "3"
+
+# Test deps
+tokio-test = "0.4"
+wiremock = "0.6"
+pretty_assertions = "1"
+
+# Internal crates (referenced by path so the workspace can rebuild from source)
+harness-core           = { path = "crates/harness-core" }
+harness-storage        = { path = "crates/harness-storage" }
+harness-orchestrator   = { path = "crates/harness-orchestrator" }
+harness-tools          = { path = "crates/harness-tools" }
+harness-sandbox        = { path = "crates/harness-sandbox" }
+harness-providers      = { path = "crates/harness-providers" }
+harness-providers-claude = { path = "crates/harness-providers-claude" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

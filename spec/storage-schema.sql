@@ -1,0 +1,3 @@
+-- Placeholder canonical schema. To be authored by Phase 0 track C.
+-- The first migration at backend/crates/harness-storage/migrations/0001_init.sql
+-- must match this file. See PLAN.md §5.3.
