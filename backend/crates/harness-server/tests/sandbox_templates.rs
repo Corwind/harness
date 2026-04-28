@@ -396,3 +396,73 @@ async fn create_validates_required_fields() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+// Timestamps (P1.followup): the wire DTO carries non-null
+// `created_at` / `updated_at` for every template once it's been
+// stored.
+
+#[tokio::test]
+async fn list_templates_carries_non_null_timestamps_for_builtins() {
+    let app = TestApp::boot().await;
+    let r = build_router(app.state.clone());
+
+    let (status, body) = json_request(r, "GET", "/v1/sandbox-templates", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let templates = body["templates"].as_array().unwrap();
+    assert!(!templates.is_empty());
+
+    for tpl in templates {
+        // Both must be present (no `null`) and parseable as RFC 3339.
+        let created = tpl["created_at"].as_str().expect("created_at present");
+        let updated = tpl["updated_at"].as_str().expect("updated_at present");
+        chrono::DateTime::parse_from_rfc3339(created)
+            .unwrap_or_else(|e| panic!("created_at {created:?} not RFC 3339: {e}"));
+        chrono::DateTime::parse_from_rfc3339(updated)
+            .unwrap_or_else(|e| panic!("updated_at {updated:?} not RFC 3339: {e}"));
+    }
+}
+
+#[tokio::test]
+async fn patch_bumps_updated_at_on_the_wire() {
+    let app = TestApp::boot().await;
+    let r = || build_router(app.state.clone());
+
+    // Create a custom template (built-ins are immutable per T1.L).
+    let (status, created) = json_request(
+        r(),
+        "POST",
+        "/v1/sandbox-templates",
+        Some(json!({
+            "name": "ts-wire",
+            "profile": "(version 1)\n(deny default)\n",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id = created["id"].as_str().unwrap().to_owned();
+    let created_at_before = created["created_at"].as_str().unwrap().to_owned();
+    let updated_at_before = created["updated_at"].as_str().unwrap().to_owned();
+
+    // Wait past the i64-second granularity so the bump is observable.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+
+    let (status, patched) = json_request(
+        r(),
+        "PATCH",
+        &format!("/v1/sandbox-templates/{id}"),
+        Some(json!({ "name": "renamed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let created_at_after = patched["created_at"].as_str().unwrap();
+    let updated_at_after = patched["updated_at"].as_str().unwrap();
+    assert_eq!(
+        created_at_after, created_at_before,
+        "PATCH must not change created_at"
+    );
+    assert!(
+        updated_at_after > updated_at_before.as_str(),
+        "PATCH must bump updated_at; before={updated_at_before}, after={updated_at_after}"
+    );
+}

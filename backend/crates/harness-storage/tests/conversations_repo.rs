@@ -114,6 +114,8 @@ async fn update_can_set_and_clear_sandbox_template() {
             description: None,
             profile: "(version 1)".into(),
             is_builtin: false,
+            created_at: 0,
+            updated_at: 0,
         })
         .await
         .unwrap();
@@ -188,6 +190,8 @@ async fn deleting_sandbox_template_nulls_conversation_fk() {
             description: None,
             profile: "(version 1)".into(),
             is_builtin: false,
+            created_at: 0,
+            updated_at: 0,
         })
         .await
         .unwrap();

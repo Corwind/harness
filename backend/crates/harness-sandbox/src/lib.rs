@@ -47,6 +47,11 @@ const PROFILE_PERMISSIVE_DEV: &str = include_str!("../profiles/permissive-dev.sb
 /// `backend/crates/harness-sandbox/profiles/<id>.sb` at compile time. The
 /// orchestrator / `SandboxTemplateRepo` is expected to seed these into
 /// the DB on first run with `is_builtin = true`.
+///
+/// `created_at` / `updated_at` are returned as `0` sentinels — the storage
+/// layer owns the canonical timestamps and stamps `now()` on first seed.
+/// See `harness_core::sandbox::SandboxTemplate` for the full ownership
+/// rule.
 pub fn builtin_templates() -> Vec<SandboxTemplate> {
     vec![
         SandboxTemplate {
@@ -59,6 +64,8 @@ pub fn builtin_templates() -> Vec<SandboxTemplate> {
             ),
             profile: PROFILE_STRICT_READONLY.to_owned(),
             is_builtin: true,
+            created_at: 0,
+            updated_at: 0,
         },
         SandboxTemplate {
             id: SandboxTemplateId::from_string(BUILTIN_NO_NETWORK),
@@ -70,6 +77,8 @@ pub fn builtin_templates() -> Vec<SandboxTemplate> {
             ),
             profile: PROFILE_NO_NETWORK.to_owned(),
             is_builtin: true,
+            created_at: 0,
+            updated_at: 0,
         },
         SandboxTemplate {
             id: SandboxTemplateId::from_string(BUILTIN_NETWORK_ONLY),
@@ -81,6 +90,8 @@ pub fn builtin_templates() -> Vec<SandboxTemplate> {
             ),
             profile: PROFILE_NETWORK_ONLY.to_owned(),
             is_builtin: true,
+            created_at: 0,
+            updated_at: 0,
         },
         SandboxTemplate {
             id: SandboxTemplateId::from_string(BUILTIN_PERMISSIVE_DEV),
@@ -92,6 +103,8 @@ pub fn builtin_templates() -> Vec<SandboxTemplate> {
             ),
             profile: PROFILE_PERMISSIVE_DEV.to_owned(),
             is_builtin: true,
+            created_at: 0,
+            updated_at: 0,
         },
     ]
 }

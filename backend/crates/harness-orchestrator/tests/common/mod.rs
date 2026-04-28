@@ -11,9 +11,10 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use harness_core::{
-    ChatEvent, ChatRequest, ExternalTool, InProcessTool, LlmProvider, ModelInfo, ProviderCapabilities,
-    ProviderConfig, ProviderError, SandboxError, SandboxRunner, SandboxTemplate, Tool, ToolCommand,
-    ToolDescriptor, ToolError, ToolKind, ToolRegistry, WrappedCommand,
+    ChatEvent, ChatRequest, ExternalTool, InProcessTool, LlmProvider, ModelInfo,
+    ProviderCapabilities, ProviderConfig, ProviderError, SandboxError, SandboxRunner,
+    SandboxTemplate, Tool, ToolCommand, ToolDescriptor, ToolError, ToolKind, ToolRegistry,
+    WrappedCommand,
 };
 
 /// Provider that returns a different scripted event sequence on each
@@ -209,13 +210,14 @@ impl ToolDescriptor for EchoCmd {
 #[async_trait]
 impl ExternalTool for EchoCmd {
     async fn command(&self, input: &serde_json::Value) -> Result<ToolCommand, ToolError> {
-        let text = input
-            .get("text")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidInput {
-                tool: "echo".to_string(),
-                message: "missing text".to_string(),
-            })?;
+        let text =
+            input
+                .get("text")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ToolError::InvalidInput {
+                    tool: "echo".to_string(),
+                    message: "missing text".to_string(),
+                })?;
         Ok(ToolCommand {
             program: "/bin/echo".to_string(),
             args: vec![text.to_string()],
@@ -291,6 +293,8 @@ pub fn fake_template(id: &str) -> SandboxTemplate {
         description: None,
         profile: "(version 1)(allow default)".to_string(),
         is_builtin: false,
+        created_at: 0,
+        updated_at: 0,
     }
 }
 

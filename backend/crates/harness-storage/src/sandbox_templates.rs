@@ -66,12 +66,16 @@ fn row_to_template(row: &sqlx::sqlite::SqliteRow) -> Result<SandboxTemplate, Rep
     let description: Option<String> = row.try_get("description").map_err(sqlx_to_repo)?;
     let profile: String = row.try_get("profile").map_err(sqlx_to_repo)?;
     let is_builtin: i64 = row.try_get("is_builtin").map_err(sqlx_to_repo)?;
+    let created_at: i64 = row.try_get("created_at").map_err(sqlx_to_repo)?;
+    let updated_at: i64 = row.try_get("updated_at").map_err(sqlx_to_repo)?;
     Ok(SandboxTemplate {
         id: SandboxTemplateId::from_string(id),
         name,
         description,
         profile,
         is_builtin: is_builtin != 0,
+        created_at,
+        updated_at,
     })
 }
 

@@ -17,6 +17,10 @@ use harness_core::{
 use serde::{Deserialize, Serialize};
 
 /// `SandboxTemplate` shape on the wire.
+///
+/// `created_at` / `updated_at` are required RFC 3339 strings (matching the
+/// OpenAPI `format: date-time`). The domain stores them as i64 epoch
+/// seconds; we convert at the edge.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SandboxTemplateDto {
     pub id: String,
@@ -25,11 +29,8 @@ pub struct SandboxTemplateDto {
     pub description: Option<String>,
     pub profile: String,
     pub is_builtin: bool,
-    /// `null` until storage exposes timestamps through the port (see module docs).
-    #[serde(default)]
-    pub created_at: Option<DateTime<Utc>>,
-    #[serde(default)]
-    pub updated_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 impl From<SandboxTemplate> for SandboxTemplateDto {
@@ -40,10 +41,21 @@ impl From<SandboxTemplate> for SandboxTemplateDto {
             description: t.description,
             profile: t.profile,
             is_builtin: t.is_builtin,
-            created_at: None,
-            updated_at: None,
+            created_at: epoch_to_dt(t.created_at),
+            updated_at: epoch_to_dt(t.updated_at),
         }
     }
+}
+
+/// Convert epoch seconds to `DateTime<Utc>`. Out-of-range values fall
+/// back to the Unix epoch — non-issue in practice because the storage
+/// layer always stamps `now()` on insert (see `harness_core::sandbox`
+/// docs).
+fn epoch_to_dt(secs: i64) -> DateTime<Utc> {
+    use chrono::TimeZone;
+    Utc.timestamp_opt(secs, 0)
+        .single()
+        .unwrap_or_else(|| Utc.timestamp_opt(0, 0).unwrap())
 }
 
 /// Body for `POST /v1/sandbox-templates`.

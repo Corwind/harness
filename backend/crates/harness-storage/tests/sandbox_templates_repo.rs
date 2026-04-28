@@ -22,6 +22,9 @@ fn tpl(id: &str, name: &str, builtin: bool) -> SandboxTemplate {
         description: Some(format!("desc for {name}")),
         profile: "(version 1)\n(deny default)".into(),
         is_builtin: builtin,
+        // Storage layer overwrites these; the sentinels are never observed.
+        created_at: 0,
+        updated_at: 0,
     }
 }
 
@@ -30,7 +33,10 @@ async fn create_get_round_trips() {
     let (_tmp, db) = open_db().await;
     let repo = SqliteSandboxTemplateRepo::new(db);
 
-    let saved = repo.create(tpl("custom-1", "Custom 1", false)).await.unwrap();
+    let saved = repo
+        .create(tpl("custom-1", "Custom 1", false))
+        .await
+        .unwrap();
     let fetched = repo.get(&saved.id).await.unwrap();
     assert_eq!(fetched, saved);
 }
@@ -69,6 +75,8 @@ async fn update_overwrites_fields() {
         profile: "(version 1)\n(allow default)".into(),
         is_builtin: saved.is_builtin,
         id: saved.id.clone(),
+        created_at: saved.created_at,
+        updated_at: saved.updated_at,
     };
     let after = repo.update(updated.clone()).await.unwrap();
     assert_eq!(after.name, "New");
@@ -83,10 +91,7 @@ async fn update_overwrites_fields() {
 async fn update_missing_yields_not_found() {
     let (_tmp, db) = open_db().await;
     let repo = SqliteSandboxTemplateRepo::new(db);
-    let err = repo
-        .update(tpl("ghost", "Ghost", false))
-        .await
-        .unwrap_err();
+    let err = repo.update(tpl("ghost", "Ghost", false)).await.unwrap_err();
     assert!(matches!(err, RepoError::NotFound), "got {err:?}");
 }
 
@@ -123,6 +128,97 @@ async fn seed_builtins_is_idempotent() {
 }
 
 #[tokio::test]
+async fn create_stamps_timestamps_and_round_trips_them() {
+    let (_tmp, db) = open_db().await;
+    let repo = SqliteSandboxTemplateRepo::new(db);
+
+    let before = chrono::Utc::now().timestamp();
+    let saved = repo.create(tpl("ts-1", "Timestamps", false)).await.unwrap();
+    let after = chrono::Utc::now().timestamp();
+
+    // Storage layer overwrites the sentinel `0` with `now()` on insert.
+    assert!(
+        saved.created_at >= before && saved.created_at <= after,
+        "expected stamped created_at within [{before}, {after}]; got {}",
+        saved.created_at
+    );
+    assert_eq!(
+        saved.created_at, saved.updated_at,
+        "fresh insert: created_at == updated_at"
+    );
+
+    let fetched = repo.get(&saved.id).await.unwrap();
+    assert_eq!(fetched.created_at, saved.created_at);
+    assert_eq!(fetched.updated_at, saved.updated_at);
+}
+
+#[tokio::test]
+async fn update_bumps_updated_at_but_preserves_created_at() {
+    let (_tmp, db) = open_db().await;
+    let repo = SqliteSandboxTemplateRepo::new(db);
+    let saved = repo.create(tpl("ts-2", "BumpMe", false)).await.unwrap();
+
+    // Sleep just past one second so the i64 timestamp can advance.
+    // i64-second granularity means an immediate update could land in
+    // the same second; the assertion uses `>=` to stay robust either
+    // way.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+
+    let next = SandboxTemplate {
+        profile: "(version 1)\n; v2".into(),
+        ..saved.clone()
+    };
+    let after = repo.update(next).await.unwrap();
+
+    assert_eq!(
+        after.created_at, saved.created_at,
+        "created_at must not change on update"
+    );
+    assert!(
+        after.updated_at > saved.updated_at,
+        "updated_at must advance after update; before={}, after={}",
+        saved.updated_at,
+        after.updated_at
+    );
+}
+
+#[tokio::test]
+async fn seed_builtins_preserves_created_at_across_reseeds() {
+    // Re-seeding a built-in should bump updated_at but not rewrite
+    // the original created_at.
+    let (_tmp, db) = open_db().await;
+    let repo = SqliteSandboxTemplateRepo::new(db);
+
+    let v1 = vec![tpl("strict-readonly", "Strict", true)];
+    repo.seed_builtins(&v1).await.unwrap();
+    let first = repo
+        .get(&harness_core::ids::SandboxTemplateId::from_string(
+            "strict-readonly",
+        ))
+        .await
+        .unwrap();
+
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+
+    repo.seed_builtins(&v1).await.unwrap();
+    let second = repo
+        .get(&harness_core::ids::SandboxTemplateId::from_string(
+            "strict-readonly",
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        second.created_at, first.created_at,
+        "second seed must preserve created_at"
+    );
+    assert!(
+        second.updated_at > first.updated_at,
+        "second seed must bump updated_at"
+    );
+}
+
+#[tokio::test]
 async fn seed_builtins_updates_changed_profile() {
     // Re-seeding after a profile bump should refresh the stored profile
     // for an existing built-in (so we can ship updates to the bundled
@@ -136,6 +232,8 @@ async fn seed_builtins_updates_changed_profile() {
         description: None,
         profile: "(version 1)\n; v1".into(),
         is_builtin: true,
+        created_at: 0,
+        updated_at: 0,
     };
     let v2 = SandboxTemplate {
         profile: "(version 1)\n; v2".into(),

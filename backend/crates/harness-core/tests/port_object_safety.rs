@@ -17,9 +17,7 @@ use chrono::Utc;
 use harness_core::error::{RepoError, SandboxError, SecretsError, ToolError};
 
 use harness_core::ids::{ConversationId, ProviderId, SandboxTemplateId};
-use harness_core::repo::{
-    Conversation, ConversationPatch, ConversationRepo, NewConversation,
-};
+use harness_core::repo::{Conversation, ConversationPatch, ConversationRepo, NewConversation};
 use harness_core::sandbox::{SandboxRunner, SandboxTemplate, WrappedCommand};
 use harness_core::secrets::SecretsVault;
 use harness_core::tool::ToolCommand;
@@ -172,7 +170,12 @@ impl SandboxRunner for FakeSandbox {
         if template.profile.is_empty() {
             return Err(SandboxError::InvalidProfile("empty".into()));
         }
-        let mut args = vec!["-p".to_string(), template.profile.clone(), "--".into(), cmd.program];
+        let mut args = vec![
+            "-p".to_string(),
+            template.profile.clone(),
+            "--".into(),
+            cmd.program,
+        ];
         args.extend(cmd.args);
         Ok(WrappedCommand {
             program: "/usr/bin/sandbox-exec".into(),
@@ -202,6 +205,8 @@ async fn sandbox_runner_object_safe_and_wraps_command() {
         description: None,
         profile: "(version 1)\n(deny default)".into(),
         is_builtin: false,
+        created_at: 0,
+        updated_at: 0,
     };
     let wrapped = runner
         .wrap(

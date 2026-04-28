@@ -78,6 +78,9 @@ async fn create(
         description: body.description,
         profile: body.profile,
         is_builtin: false,
+        // Storage stamps `now()` for both on insert; sentinels here.
+        created_at: 0,
+        updated_at: 0,
     };
     let stored = state.sandbox_templates.create(template).await?;
     Ok((StatusCode::CREATED, Json(stored.into())))

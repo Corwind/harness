@@ -252,7 +252,10 @@ fn chat_event_message_stop_omits_usage_when_absent() {
         usage: None,
     })
     .unwrap();
-    assert_eq!(v, json!({"type": "message_stop", "stop_reason": "tool_use"}));
+    assert_eq!(
+        v,
+        json!({"type": "message_stop", "stop_reason": "tool_use"})
+    );
 }
 
 #[test]
@@ -403,6 +406,8 @@ fn sandbox_template_round_trip() {
             description: Some("deny all writes".into()),
             profile: "(version 1)\n(deny default)\n".into(),
             is_builtin: true,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_500,
         },
         json!({
             "id": "tpl_strict",
@@ -410,6 +415,8 @@ fn sandbox_template_round_trip() {
             "description": "deny all writes",
             "profile": "(version 1)\n(deny default)\n",
             "is_builtin": true,
+            "created_at": 1_700_000_000,
+            "updated_at": 1_700_000_500,
         }),
     );
 }
