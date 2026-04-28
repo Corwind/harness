@@ -1,6 +1,20 @@
-//! `harness-providers-claude` — Anthropic Messages API implementation of `LlmProvider`.
+//! `harness-providers-claude` — Anthropic (Claude) Messages API
+//! implementation of `harness_core::LlmProvider`.
 //!
-//! Streams against the Messages API and translates Anthropic's SSE event names
-//! to the canonical `harness_core::ChatEvent` enum so callers see one shape.
+//! Talks raw HTTPS via `reqwest` (rustls); SSE is decoded with
+//! `eventsource-stream`. Translates Anthropic's `message_start` /
+//! `content_block_*` / `message_delta` / `message_stop` / `error` SSE
+//! events into the canonical `ChatEvent` enum so the orchestrator sees
+//! one shape across every provider.
 //!
-//! Filled in by Phase 1 / track C.
+//! Per PLAN R2 there is no third-party Anthropic SDK dependency.
+
+#![forbid(unsafe_code)]
+#![warn(missing_debug_implementations, rust_2018_idioms)]
+
+mod config;
+mod provider;
+mod translate;
+mod wire;
+
+pub use provider::ClaudeProvider;
