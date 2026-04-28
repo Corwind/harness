@@ -1,0 +1,36 @@
+; network-only.sb — built-in template
+;
+; Intent: the tool needs to make network requests but should not write to the
+; user's filesystem. Use this for fetchers (curl, wget) or tools that pull
+; remote data and emit results to stdout.
+
+(version 1)
+
+; Deny everything by default — we whitelist below.
+(deny default)
+
+; Permit all network operations (inbound, outbound, bind).
+(allow network*)
+
+; Reads from system locations only — no user data, no writes anywhere.
+; /usr/lib/dyld is required by every dynamically-linked binary on macOS.
+(allow file-read*
+  (subpath "/usr")
+  (subpath "/System")
+  (subpath "/Library")
+  (subpath "/private/etc")
+  (literal "/usr/lib/dyld"))
+
+(allow file-read-metadata)
+
+; Process management so the tool can fork helpers or re-exec.
+(allow process-fork)
+(allow process-exec)
+
+(allow signal (target self))
+
+; Mach lookups required by libSystem / dyld.
+(allow mach-lookup)
+
+; Spell out the intent: writes are forbidden.
+(deny file-write*)

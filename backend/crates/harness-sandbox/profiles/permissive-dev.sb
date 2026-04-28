@@ -1,0 +1,29 @@
+; permissive-dev.sb — built-in template
+;
+; ⚠ DEV ONLY — do not ship as a default for end users.
+;
+; Intent: a near-pass-through profile that still blocks the most sensitive
+; locations on the user's machine (SSH keys, Keychains, cloud credentials,
+; gh CLI tokens). Useful when iterating on a tool and the strict templates
+; are getting in the way. The orchestrator should never select this template
+; automatically — it must be an explicit user choice.
+;
+; The deny stanzas use regular expressions against absolute paths so the
+; profile is independent of which user account it runs under: any path under
+; /Users/<name>/ that matches a sensitive location is blocked.
+
+(version 1)
+
+; Permissive base: allow everything not explicitly denied.
+(allow default)
+
+; Block reads and writes for credential stores under any user's home.
+; - ~/.ssh           : SSH private keys, known_hosts
+; - ~/.aws           : AWS access keys / SSO sessions
+; - ~/.config/gh     : GitHub CLI tokens
+; - ~/Library/Keychains : macOS Keychain databases
+(deny file-read* file-write*
+  (regex #"^/Users/[^/]+/\.ssh(/|$)")
+  (regex #"^/Users/[^/]+/\.aws(/|$)")
+  (regex #"^/Users/[^/]+/\.config/gh(/|$)")
+  (regex #"^/Users/[^/]+/Library/Keychains(/|$)"))

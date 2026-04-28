@@ -1,0 +1,19 @@
+; no-network.sb — built-in template
+;
+; Intent: filesystem work is fine, but the tool must not reach the network.
+; Use this for tools that read/write user files (linters that fix in place,
+; code generators, formatters) where outbound traffic would be a smell.
+
+(version 1)
+
+; Permissive base: anything not explicitly denied below is allowed.
+(allow default)
+
+; Process and signal operations are explicitly permitted to be self-documenting.
+(allow process-fork)
+(allow process-exec)
+(allow signal (target self))
+
+; The single explicit denial: outbound (and inbound) network traffic of any kind.
+; `network*` covers network-inbound, network-outbound, network-bind, etc.
+(deny network*)

@@ -1,0 +1,40 @@
+; strict-readonly.sb — built-in template
+;
+; Intent: read-only execution. The tool can examine system files and run
+; subprocesses, but cannot write anywhere and cannot touch the network.
+; Use this for tools that lint, parse, or analyse code.
+
+(version 1)
+
+; Deny everything by default. We allow only what we explicitly enumerate below.
+(deny default)
+
+; Permit reading from the standard system locations a typical CLI tool needs:
+; - /usr        : userland binaries and libraries
+; - /System     : Apple-provided frameworks and libraries
+; - /Library    : system-wide libraries
+; - /private/etc: resolver, hosts, /etc/* configuration
+; - /private/tmp: shared temp dir (some tools materialise inputs here)
+(allow file-read*
+  (subpath "/usr")
+  (subpath "/System")
+  (subpath "/Library")
+  (subpath "/private/etc")
+  (subpath "/private/tmp"))
+
+; Tools may need to read their own metadata (e.g. dyld cache, mach hosts).
+(allow file-read-metadata)
+
+; Allow process management so the tool can spawn helpers (compilers, etc.).
+(allow process-fork)
+(allow process-exec)
+
+; Allow signalling self / children — required for normal shutdown semantics.
+(allow signal (target self))
+
+; Mach lookups used by libSystem (Foundation, CoreFoundation bootstrap).
+(allow mach-lookup)
+
+; Explicit denies — redundant with `(deny default)` but spell out the intent.
+(deny file-write*)
+(deny network*)
