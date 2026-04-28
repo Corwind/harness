@@ -186,9 +186,9 @@ impl SandboxRunner for FakeSandbox {
         if profile.contains("(version 1)") {
             Ok(())
         } else {
-            Err(SandboxError::ValidationFailed(
-                "missing version directive".into(),
-            ))
+            Err(SandboxError::ProfileInvalid {
+                stderr: "missing version directive".into(),
+            })
         }
     }
 }
@@ -222,7 +222,7 @@ async fn sandbox_runner_object_safe_and_wraps_command() {
     runner.validate("(version 1) ...").await.unwrap();
     assert!(matches!(
         runner.validate("nope").await.unwrap_err(),
-        SandboxError::ValidationFailed(_)
+        SandboxError::ProfileInvalid { .. }
     ));
 }
 

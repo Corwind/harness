@@ -9,6 +9,7 @@ description = "Wrap subprocess invocations in macOS sandbox-exec using user-mana
 [dependencies]
 harness-core.workspace = true
 
+async-trait.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

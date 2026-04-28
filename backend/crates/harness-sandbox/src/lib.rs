@@ -19,7 +19,12 @@
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations, rust_2018_idioms)]
 
+mod runner;
+mod wrap;
+
 pub use harness_core::{SandboxError, SandboxRunner, SandboxTemplate, SandboxTemplateId};
+pub use runner::SbxRunner;
+pub use wrap::wrapped_command_to_tokio;
 
 /// Stable identifier for the `strict-readonly` built-in template.
 pub const BUILTIN_STRICT_READONLY: &str = "strict-readonly";

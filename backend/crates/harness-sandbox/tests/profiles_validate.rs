@@ -9,31 +9,17 @@
 
 #![cfg(target_os = "macos")]
 
-use std::io::Write;
+mod util;
+
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
 // `SandboxTemplate` is re-exported from harness-core via harness-sandbox.
 use harness_sandbox::{builtin_templates, SandboxTemplate};
-use tempfile::NamedTempFile;
 
-const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
-const TRUE_BIN: &str = "/usr/bin/true";
+use crate::util::{host_forbids_nested_sandbox, write_profile, SANDBOX_EXEC, TRUE_BIN};
+
 const CURL_BIN: &str = "/usr/bin/curl";
-
-/// Write `profile` to a tempfile and return the handle. The caller keeps
-/// the handle alive for the duration of the sandbox-exec invocation so the
-/// file is not unlinked underneath us.
-fn write_profile(profile: &str) -> NamedTempFile {
-    let mut f = tempfile::Builder::new()
-        .prefix("harness-sandbox-test-")
-        .suffix(".sb")
-        .tempfile()
-        .expect("create tempfile");
-    f.write_all(profile.as_bytes()).expect("write profile");
-    f.flush().expect("flush profile");
-    f
-}
 
 /// Run `sandbox-exec -f <profile-file> -- <argv>` and return (exit_code, stderr).
 fn run_under_sandbox(profile_path: &std::path::Path, argv: &[&str]) -> (i32, String) {
@@ -48,30 +34,6 @@ fn run_under_sandbox(profile_path: &std::path::Path, argv: &[&str]) -> (i32, Str
     let code = out.status.code().unwrap_or(-1);
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     (code, stderr)
-}
-
-/// True when `sandbox-exec` cannot apply *any* profile in the current
-/// environment (i.e. we are already running inside a sandbox that forbids
-/// nesting, like Claude Code's container or some CI runners). In that
-/// case validation tests have nothing to prove and we skip rather than
-/// emit a false negative — the tests still run on a developer's normal
-/// shell and in macOS CI runners that do not pre-sandbox.
-fn host_forbids_nested_sandbox() -> bool {
-    // The cheapest probe: an "allow default" profile is the most
-    // permissive thing sandbox-exec will accept. If even *that* fails to
-    // apply, the host is refusing all nested sandboxing.
-    let probe = "(version 1)\n(allow default)\n";
-    let f = write_profile(probe);
-    let out = Command::new(SANDBOX_EXEC)
-        .arg("-f")
-        .arg(f.path())
-        .arg(TRUE_BIN)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output();
-    let Ok(out) = out else { return true };
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    !out.status.success() && stderr.contains("sandbox_apply")
 }
 
 fn validate(template: &SandboxTemplate) {

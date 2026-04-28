@@ -102,9 +102,11 @@ pub enum SandboxError {
     #[error("sandbox I/O error: {0}")]
     Io(String),
 
-    /// Validation of a profile via dry-run failed.
-    #[error("sandbox profile validation failed: {0}")]
-    ValidationFailed(String),
+    /// Validation of a profile via dry-run failed. `stderr` is the
+    /// captured stderr from the validator (typically `sandbox-exec`)
+    /// so callers can surface the precise compiler diagnostic.
+    #[error("sandbox profile validation failed: {stderr}")]
+    ProfileInvalid { stderr: String },
 }
 
 /// Failures observable from any repository port.
