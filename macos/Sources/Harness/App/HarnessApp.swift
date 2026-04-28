@@ -13,6 +13,7 @@ public struct HarnessApp: App {
                     await bootstrap()
                 }
         }
+        SettingsHostScene(state: state)
     }
 
     private func bootstrap() async {
@@ -47,6 +48,11 @@ enum BootstrapState {
     case loading
     case ready(BackendSession)
     case failed(Error)
+
+    var session: BackendSession? {
+        if case .ready(let s) = self { return s }
+        return nil
+    }
 }
 
 public struct HarnessRoot: View {
@@ -70,15 +76,7 @@ public struct HarnessRoot: View {
             }
             .frame(minWidth: 480, minHeight: 320)
         case .ready(let session):
-            VStack(spacing: 8) {
-                Text("Connected")
-                    .font(.headline)
-                Text(session.baseURL.absoluteString)
-                    .font(.system(.body, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(minWidth: 480, minHeight: 320)
-            .padding()
+            RootView(session: session)
         case .failed(let error):
             VStack(spacing: 8) {
                 Text("Backend failed to start")
