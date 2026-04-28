@@ -152,7 +152,7 @@ async fn post_message(
         .ok_or_else(|| {
             ApiError::new(
                 StatusCode::CONFLICT,
-                "provider_unconfigured",
+                "provider.unconfigured",
                 format!(
                     "provider '{}' has no stored configuration",
                     conversation.provider_id

@@ -63,7 +63,7 @@ async fn list_models(
     let Some(config_value) = stored else {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
-            "provider_unconfigured",
+            "provider.unconfigured",
             format!("provider '{id}' has no stored configuration"),
         ));
     };
@@ -73,13 +73,10 @@ async fn list_models(
         config: config_value,
     };
 
-    let models = provider.list_models(&cfg).await.map_err(|e| {
-        ApiError::new(
-            StatusCode::BAD_GATEWAY,
-            "provider_error",
-            format!("list_models failed: {e}"),
-        )
-    })?;
+    // ProviderError → ApiError mapping preserves semantics: 401 for
+    // bad credentials, 429 with Retry-After for rate limits, etc.
+    // See `error::From<ProviderError> for ApiError`.
+    let models = provider.list_models(&cfg).await?;
 
     Ok(Json(ModelsEnvelope {
         models: models.into_iter().map(ModelDto::from).collect(),

@@ -41,14 +41,56 @@ pub const FAKE_GREETING: &str = "Hello from fake provider.";
 /// the `tool_use_*` deltas the orchestrator stitches together.
 pub const FAKE_TOOL_USE_ID: &str = "fake_tu_1";
 
+/// Failure-mode injection for tests of the `ProviderError` → HTTP
+/// mapping (T1.followup).
+///
+/// Each variant flips a switch on [`FakeProvider`]: every subsequent
+/// `list_models` / `chat` call returns the corresponding `ProviderError`
+/// instead of the canned success path. Production code uses
+/// [`FakeProvider::new`] which leaves `failure: None`; tests use
+/// [`FakeProvider::with_failure`].
+#[derive(Debug, Clone)]
+pub enum FakeFailure {
+    Unauthorized,
+    RateLimited { retry_after_secs: Option<u64> },
+    Transport,
+    UpstreamStatus(u16),
+}
+
 /// Built-in deterministic provider used by the `HARNESS_FAKE_PROVIDER`
 /// runtime knob and (transitively) by the Swift e2e suite.
 #[derive(Debug, Default)]
-pub struct FakeProvider;
+pub struct FakeProvider {
+    failure: Option<FakeFailure>,
+}
 
 impl FakeProvider {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    /// Construct a fake whose every `list_models` / `chat` call returns
+    /// the supplied `ProviderError`. Test-only seam — the production
+    /// env-knob path uses [`FakeProvider::new`].
+    pub fn with_failure(failure: FakeFailure) -> Self {
+        Self {
+            failure: Some(failure),
+        }
+    }
+
+    fn synth_error(&self) -> Option<ProviderError> {
+        self.failure.as_ref().map(|f| match f {
+            FakeFailure::Unauthorized => ProviderError::Unauthorized("bad api key".to_owned()),
+            FakeFailure::RateLimited { retry_after_secs } => ProviderError::RateLimited {
+                retry_after_secs: *retry_after_secs,
+                message: "slow down".to_owned(),
+            },
+            FakeFailure::Transport => ProviderError::Transport("connect refused".to_owned()),
+            FakeFailure::UpstreamStatus(s) => ProviderError::Request {
+                status: Some(*s),
+                message: format!("upstream returned {s}"),
+            },
+        })
     }
 }
 
@@ -76,6 +118,9 @@ impl LlmProvider for FakeProvider {
     }
 
     async fn list_models(&self, _cfg: &ProviderConfig) -> Result<Vec<ModelInfo>, ProviderError> {
+        if let Some(err) = self.synth_error() {
+            return Err(err);
+        }
         Ok(vec![ModelInfo {
             id: "fake-claude".to_owned(),
             display_name: "Fake Claude".to_owned(),
@@ -89,6 +134,9 @@ impl LlmProvider for FakeProvider {
         _cfg: &ProviderConfig,
         request: ChatRequest,
     ) -> Result<BoxStream<'static, ChatEvent>, ProviderError> {
+        if let Some(err) = self.synth_error() {
+            return Err(err);
+        }
         let events = decide_turn(&request);
         Ok(Box::pin(stream::iter(events)))
     }

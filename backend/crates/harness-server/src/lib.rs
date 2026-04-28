@@ -44,4 +44,4 @@ pub use providers::ProviderRegistry;
 pub use runs::{RunRegistry, RUN_RETENTION};
 pub use server::{bind_loopback, build_router, serve, BoundServer, ServerConfig};
 pub use state::AppState;
-pub use testing::FakeProvider;
+pub use testing::{FakeFailure, FakeProvider};
