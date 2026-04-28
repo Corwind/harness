@@ -6,30 +6,47 @@
 //! * The composition root (`main`) constructs a single instance per process
 //!   and clones it into the router (`Arc` clone is cheap).
 //!
-//! Future tasks (T1.E) will extend this with `LlmProvider`, `MessageRepo`,
-//! `SettingsRepo`, etc. Keeping `AppState` a struct of trait objects (rather
-//! than separate `State<...>` extractors per handler) means new ports can be
-//! added without touching every signature.
+//! T1.E expands this to carry the orchestrator, the provider registry, and
+//! the in-memory run registry. Adding new ports is additive: handlers
+//! destructure the fields they need without changing their signatures.
 
 use std::sync::Arc;
 
-use harness_core::{ConversationRepo, SandboxRunner, SandboxTemplateRepo};
+use harness_core::{
+    ConversationRepo, MessageRepo, ProvidersConfigRepo, SandboxRunner, SandboxTemplateRepo,
+    SettingsRepo, ToolRegistry,
+};
+use harness_orchestrator::Orchestrator;
 
-use crate::auth::SessionToken;
+use crate::{auth::SessionToken, providers::ProviderRegistry, runs::RunRegistry};
 
 /// Container for every port a request handler may need.
 #[derive(Clone)]
 pub struct AppState {
     pub token: SessionToken,
+
+    // Storage ports
     pub sandbox_templates: Arc<dyn SandboxTemplateRepo>,
     pub conversations: Arc<dyn ConversationRepo>,
+    pub messages: Arc<dyn MessageRepo>,
+    pub settings: Arc<dyn SettingsRepo>,
+    pub providers_config: Arc<dyn ProvidersConfigRepo>,
+
+    // Sandboxing
     pub sandbox_runner: Arc<dyn SandboxRunner>,
+
+    // Orchestration
+    pub providers: Arc<ProviderRegistry>,
+    pub tools: Arc<dyn ToolRegistry>,
+    pub orchestrator: Arc<Orchestrator>,
+    pub runs: Arc<RunRegistry>,
 }
 
 impl std::fmt::Debug for AppState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AppState")
             .field("token", &"<redacted>")
+            .field("providers", &self.providers)
             .finish_non_exhaustive()
     }
 }

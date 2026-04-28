@@ -184,3 +184,169 @@ impl PatchConversationRequest {
 pub fn conv_id(s: impl Into<String>) -> ConversationId {
     ConversationId::from_string(s)
 }
+
+// ----------------------------------------------------------------------------
+// T1.E DTOs (providers / models / messages / runs / settings).
+// ----------------------------------------------------------------------------
+
+use harness_core::{
+    provider::{ModelInfo, ProviderCapabilities},
+    repo::StoredMessage,
+};
+
+/// `GET /v1/providers` envelope.
+#[derive(Clone, Debug, Serialize)]
+pub struct ProvidersEnvelope {
+    pub providers: Vec<ProviderDto>,
+}
+
+/// `Provider` shape per OpenAPI.
+#[derive(Clone, Debug, Serialize)]
+pub struct ProviderDto {
+    pub id: String,
+    pub display_name: String,
+    pub configured: bool,
+    pub capabilities: ProviderCapabilitiesDto,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ProviderCapabilitiesDto {
+    pub streaming: bool,
+    pub tools: bool,
+    pub vision: bool,
+    pub system_prompt: bool,
+    pub max_context_tokens: Option<u32>,
+}
+
+impl From<ProviderCapabilities> for ProviderCapabilitiesDto {
+    fn from(c: ProviderCapabilities) -> Self {
+        Self {
+            streaming: c.streaming,
+            tools: c.tools,
+            vision: c.vision,
+            system_prompt: c.system_prompt,
+            max_context_tokens: c.max_context_tokens,
+        }
+    }
+}
+
+/// `GET /v1/providers/{id}/models` envelope.
+#[derive(Clone, Debug, Serialize)]
+pub struct ModelsEnvelope {
+    pub models: Vec<ModelDto>,
+}
+
+/// `Model` shape per OpenAPI.
+#[derive(Clone, Debug, Serialize)]
+pub struct ModelDto {
+    pub id: String,
+    pub display_name: String,
+    pub context_window: Option<u32>,
+    pub supports_tools: Option<bool>,
+    pub supports_vision: Option<bool>,
+}
+
+impl From<ModelInfo> for ModelDto {
+    fn from(m: ModelInfo) -> Self {
+        Self {
+            id: m.id,
+            display_name: m.display_name,
+            context_window: m.context_window,
+            // The domain `ModelInfo` does not carry per-model capability
+            // flags yet — surface them as `null`. Provider-level
+            // capabilities are still available via `/v1/providers`.
+            supports_tools: None,
+            supports_vision: None,
+        }
+    }
+}
+
+/// Body for `POST /v1/providers/{id}/config`. Open-shaped on purpose —
+/// the inner JSON is forwarded to the provider adapter.
+#[derive(Clone, Debug, Deserialize)]
+pub struct UpsertProviderConfigRequest {
+    #[serde(flatten)]
+    pub config: serde_json::Value,
+}
+
+/// Response for `POST /v1/providers/{id}/config`.
+#[derive(Clone, Debug, Serialize)]
+pub struct ProviderConfigSummaryDto {
+    pub provider_id: String,
+    pub configured: bool,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// `GET /v1/conversations` envelope (paginated).
+#[derive(Clone, Debug, Serialize)]
+pub struct ConversationsEnvelope {
+    pub conversations: Vec<ConversationDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+/// `Message` shape per OpenAPI.
+#[derive(Clone, Debug, Serialize)]
+pub struct MessageDto {
+    pub id: String,
+    pub conversation_id: String,
+    pub role: String,
+    pub content: Vec<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
+    pub ordinal: i64,
+}
+
+impl From<StoredMessage> for MessageDto {
+    fn from(m: StoredMessage) -> Self {
+        let role = match m.role {
+            harness_core::Role::User => "user",
+            harness_core::Role::Assistant => "assistant",
+            harness_core::Role::Tool => "tool",
+            harness_core::Role::System => "system",
+        };
+        // Round-trip through serde_json so the wire shape exactly
+        // matches `MessageContentBlock` in the OpenAPI (which mirrors
+        // `ContentBlock`'s own serde shape).
+        let content = m
+            .content
+            .into_iter()
+            .map(|b| serde_json::to_value(b).expect("ContentBlock serialises infallibly"))
+            .collect();
+        Self {
+            id: m.id.into_string(),
+            conversation_id: m.conversation_id.into_string(),
+            role: role.to_owned(),
+            content,
+            created_at: m.created_at,
+            ordinal: m.ordinal,
+        }
+    }
+}
+
+/// `GET /v1/conversations/{id}/messages` envelope.
+#[derive(Clone, Debug, Serialize)]
+pub struct MessagesEnvelope {
+    pub messages: Vec<MessageDto>,
+}
+
+/// Body for `POST /v1/conversations/{id}/messages`.
+#[derive(Clone, Debug, Deserialize)]
+pub struct PostMessageRequest {
+    pub content: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+}
+
+/// `RunHandle` returned by `POST /v1/conversations/{id}/messages`.
+#[derive(Clone, Debug, Serialize)]
+pub struct RunHandleDto {
+    pub run_id: String,
+    pub conversation_id: String,
+    pub message_id: String,
+}
+
+/// `Settings` shape — free-form `serde_json::Value`. Round-tripped
+/// untouched.
+pub type SettingsDto = serde_json::Value;

@@ -17,10 +17,6 @@ use tokio::net::TcpListener;
 use crate::{auth::require_token, routes, state::AppState};
 
 /// Bridge type kept for source compatibility with T1.A callers.
-///
-/// T1.L moved shared services into [`AppState`]. `build_router` now takes
-/// the full [`AppState`] directly; this struct exists only as a thin
-/// alias for symmetry.
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     pub state: AppState,
@@ -44,6 +40,10 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::health::router::<AppState>())
         .merge(routes::sandbox_templates::router())
         .merge(routes::conversations::router())
+        .merge(routes::providers::router())
+        .merge(routes::messages::router())
+        .merge(routes::runs::router())
+        .merge(routes::settings::router())
         .with_state(state)
         .layer(middleware::from_fn_with_state(token, require_token))
 }
@@ -69,9 +69,7 @@ pub async fn bind_loopback() -> std::io::Result<BoundServer> {
 
 /// Run the server until `shutdown` resolves. In-flight requests are allowed
 /// to finish; PLAN §6 T1.A allots up to 5s — axum's `with_graceful_shutdown`
-/// honours that as long as handlers cooperate. The bound 5s upper-bound is
-/// enforced at the binary entry point (`main`) by racing a timer alongside
-/// the graceful path.
+/// honours that as long as handlers cooperate.
 pub async fn serve<F>(bound: BoundServer, router: Router, shutdown: F) -> std::io::Result<()>
 where
     F: Future<Output = ()> + Send + 'static,

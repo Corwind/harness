@@ -44,6 +44,8 @@ once_cell.workspace = true
 bytes.workspace = true
 chrono.workspace = true
 async-trait.workspace = true
+base64 = "0.22"
+async-stream = "0.3"
 
 [dev-dependencies]
 reqwest.workspace = true

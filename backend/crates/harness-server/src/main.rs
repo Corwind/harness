@@ -58,6 +58,10 @@ async fn main() -> anyhow::Result<()> {
     //    them keeps the threat model honest.
     let state = acquire_state(token).await?;
 
+    // 5b. Spawn the run-registry reaper. Detached for the lifetime of
+    //    the process; aborted implicitly on shutdown via tokio runtime.
+    let _reaper = state.runs.clone().spawn_reaper();
+
     // 6. Build the router and run with graceful shutdown.
     let router = build_router(state);
     serve(bound, router, shutdown_signal()).await?;
