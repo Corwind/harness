@@ -1,19 +1,23 @@
 //! End-to-end test: bind a real loopback listener, hit `/v1/health` over HTTP,
 //! then trigger graceful shutdown and ensure the server task completes.
 
+mod common;
+
 use std::time::Duration;
 
-use harness_server::{bind_loopback, build_router, serve, ServerConfig, SessionToken};
+use harness_server::{bind_loopback, build_router, serve};
 use pretty_assertions::assert_eq;
 use tokio::sync::oneshot;
 
-const TOKEN: &str = "e2e-token-32bytes-deadbeefcafe00";
+use common::{TestApp, TOKEN};
 
 #[tokio::test]
 async fn health_round_trips_over_real_loopback_and_server_shuts_down() {
+    let app = TestApp::boot().await;
+
     let bound = bind_loopback().await.expect("bind loopback");
     let addr = bound.local_addr;
-    let router = build_router(ServerConfig::new(SessionToken::new(TOKEN)));
+    let router = build_router(app.state.clone());
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let server_task = tokio::spawn(async move {

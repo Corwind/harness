@@ -7,14 +7,22 @@
 //!    All subsequent diagnostics go to **stderr** so the parent (Swift app)
 //!    can read the handshake unambiguously from the first line.
 //! 4. Initialise `tracing` against stderr.
-//! 5. Run the axum app with graceful shutdown on SIGTERM/SIGINT.
+//! 5. Open the SQLite DB (path from `HARNESS_DB_PATH`, key from
+//!    `HARNESS_DB_KEY_HEX`), seed built-in sandbox templates (idempotent),
+//!    build app state.
+//! 6. Run the axum app with graceful shutdown on SIGTERM/SIGINT.
 
 use std::io::Write;
+use std::path::PathBuf;
 
-use anyhow::Context;
-use harness_server::{bind_loopback, build_router, serve, Handshake, ServerConfig, SessionToken};
+use anyhow::{anyhow, Context};
+use harness_server::{bind_loopback, build_router, serve, AppState, Handshake, SessionToken};
+use harness_storage::{Db, Secret};
 use tokio::signal::unix::{signal, SignalKind};
 use tracing_subscriber::EnvFilter;
+
+const ENV_DB_PATH: &str = "HARNESS_DB_PATH";
+const ENV_DB_KEY_HEX: &str = "HARNESS_DB_KEY_HEX";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -22,8 +30,8 @@ async fn main() -> anyhow::Result<()> {
     let bound = bind_loopback().await.context("bind 127.0.0.1:0")?;
     let port = bound.local_addr.port();
 
-    // 2. Token: 32 hex chars from a v4 UUID is enough entropy and trivial to
-    //    transport in a header value.
+    // 2. Token: 32 hex chars from a v4 UUID is enough entropy and trivial
+    //    to transport in a header value.
     let token_str = uuid::Uuid::new_v4().simple().to_string();
     let token = SessionToken::new(token_str.clone());
 
@@ -45,11 +53,35 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!(port = port, "harness-server listening on loopback");
 
-    // 5. Build the router and run with graceful shutdown.
-    let router = build_router(ServerConfig::new(token));
+    // 5. Open DB and build app state. The Swift parent supplies both the
+    //    DB path and the at-rest encryption key; refusing to start without
+    //    them keeps the threat model honest.
+    let state = acquire_state(token).await?;
+
+    // 6. Build the router and run with graceful shutdown.
+    let router = build_router(state);
     serve(bound, router, shutdown_signal()).await?;
     tracing::info!("harness-server shutdown complete");
     Ok(())
+}
+
+async fn acquire_state(token: SessionToken) -> anyhow::Result<AppState> {
+    let db_path = std::env::var(ENV_DB_PATH)
+        .map(PathBuf::from)
+        .map_err(|_| anyhow!("{ENV_DB_PATH} must be set to the SQLite file path"))?;
+
+    let key_hex = std::env::var(ENV_DB_KEY_HEX)
+        .map_err(|_| anyhow!("{ENV_DB_KEY_HEX} must be set to a 64-char hex key"))?;
+    let secret = Secret::from_hex(&key_hex)
+        .ok_or_else(|| anyhow!("{ENV_DB_KEY_HEX} must be exactly 64 hex characters"))?;
+
+    let db = Db::open(&db_path, secret)
+        .await
+        .with_context(|| format!("open SQLite at {}", db_path.display()))?;
+
+    harness_server::bootstrap::acquire_app_state(db, token)
+        .await
+        .context("acquire app state")
 }
 
 /// Future that resolves on the first received SIGTERM or SIGINT.

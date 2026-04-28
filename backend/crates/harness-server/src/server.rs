@@ -14,33 +14,38 @@ use std::{future::Future, net::SocketAddr};
 use axum::{middleware, Router};
 use tokio::net::TcpListener;
 
-use crate::{
-    auth::{require_token, SessionToken},
-    routes,
-};
+use crate::{auth::require_token, routes, state::AppState};
 
-/// Configuration for the HTTP server. Currently just the session token.
+/// Bridge type kept for source compatibility with T1.A callers.
+///
+/// T1.L moved shared services into [`AppState`]. `build_router` now takes
+/// the full [`AppState`] directly; this struct exists only as a thin
+/// alias for symmetry.
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
-    pub token: SessionToken,
+    pub state: AppState,
 }
 
 impl ServerConfig {
-    pub fn new(token: SessionToken) -> Self {
-        Self { token }
+    pub fn new(state: AppState) -> Self {
+        Self { state }
     }
 }
 
 /// Build the axum `Router` for the public HTTP surface, with the
 /// `X-Harness-Token` middleware applied to every route.
 ///
-/// T1.A: only `/v1/health` is mounted. Per PLAN §6 T1.A acceptance criteria,
-/// `/v1/health` is gated by the same token as every other route — the
-/// loopback bind is defense-in-depth, not the primary access control.
-pub fn build_router(config: ServerConfig) -> Router {
-    let token = config.token;
+/// PLAN §6 T1.A acceptance: every route is gated by the same token —
+/// the loopback bind is defense in depth, not the primary access control.
+pub fn build_router(state: AppState) -> Router {
+    let token = state.token.clone();
 
-    routes::health::router::<()>().layer(middleware::from_fn_with_state(token, require_token))
+    Router::new()
+        .merge(routes::health::router::<AppState>())
+        .merge(routes::sandbox_templates::router())
+        .merge(routes::conversations::router())
+        .with_state(state)
+        .layer(middleware::from_fn_with_state(token, require_token))
 }
 
 /// A bound TCP listener plus the loopback address it actually picked. Ports

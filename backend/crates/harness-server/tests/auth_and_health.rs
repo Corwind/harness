@@ -4,24 +4,29 @@
 //! not bind a socket; the loopback bind path is covered by
 //! `tests/server_e2e.rs`.
 
+mod common;
+
 use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use harness_server::{build_router, ServerConfig, SessionToken, TOKEN_HEADER};
+use harness_server::{build_router, TOKEN_HEADER};
 use http_body_util::BodyExt;
 use pretty_assertions::assert_eq;
 use tower::ServiceExt;
 
-const TOKEN: &str = "test-token-please-ignore";
+use common::{TestApp, TOKEN};
 
-fn router() -> axum::Router {
-    build_router(ServerConfig::new(SessionToken::new(TOKEN)))
+async fn router() -> (axum::Router, TestApp) {
+    let app = TestApp::boot().await;
+    let r = build_router(app.state.clone());
+    (r, app)
 }
 
 #[tokio::test]
 async fn health_returns_200_with_valid_token() {
-    let response = router()
+    let (router, _app) = router().await;
+    let response = router
         .oneshot(
             Request::builder()
                 .uri("/v1/health")
@@ -42,7 +47,8 @@ async fn health_returns_200_with_valid_token() {
 
 #[tokio::test]
 async fn missing_token_returns_401() {
-    let response = router()
+    let (router, _app) = router().await;
+    let response = router
         .oneshot(
             Request::builder()
                 .uri("/v1/health")
@@ -57,7 +63,8 @@ async fn missing_token_returns_401() {
 
 #[tokio::test]
 async fn wrong_token_returns_401() {
-    let response = router()
+    let (router, _app) = router().await;
+    let response = router
         .oneshot(
             Request::builder()
                 .uri("/v1/health")
@@ -74,7 +81,8 @@ async fn wrong_token_returns_401() {
 #[tokio::test]
 async fn token_with_different_length_returns_401() {
     // Constant-time comparison still rejects different-length candidates.
-    let response = router()
+    let (router, _app) = router().await;
+    let response = router
         .oneshot(
             Request::builder()
                 .uri("/v1/health")
@@ -93,7 +101,8 @@ async fn unknown_route_with_valid_token_returns_404() {
     // The auth layer must run before route matching is finalised, but axum's
     // 404 still wins for a missing route. This test pins that behavior so
     // future endpoints don't accidentally start authenticating 404 paths.
-    let response = router()
+    let (router, _app) = router().await;
+    let response = router
         .oneshot(
             Request::builder()
                 .uri("/v1/does-not-exist")

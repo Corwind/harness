@@ -15,9 +15,15 @@ name = "harness-server"
 path = "src/main.rs"
 
 [dependencies]
-# T1.A needs only the domain crate. Orchestrator / storage / sandbox /
-# providers wiring lands in T1.E.
+# Composition root: depends on every adapter (per PLAN §2.5). T1.L wires
+# storage + sandbox endpoints; orchestrator / providers wiring lands in T1.E
+# but the deps are listed here so the crate graph is stable across phases.
 harness-core.workspace = true
+harness-storage.workspace = true
+harness-sandbox.workspace = true
+harness-orchestrator.workspace = true
+harness-tools.workspace = true
+harness-providers.workspace = true
 
 axum.workspace = true
 tower.workspace = true
@@ -36,6 +42,8 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 once_cell.workspace = true
 bytes.workspace = true
+chrono.workspace = true
+async-trait.workspace = true
 
 [dev-dependencies]
 reqwest.workspace = true
