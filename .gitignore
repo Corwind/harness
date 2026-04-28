@@ -38,3 +38,7 @@ macos/Harness.xcworkspace/
 
 # Logs
 *.log
+
+# Markdown — plans, READMEs, narrative specs are kept outside the repo by policy.
+# Allow .md only where it is the canonical source of a contract (none currently).
+*.md

@@ -19,14 +19,7 @@ let package = Package(
         .target(
             name: "HarnessApp",
             path: "Sources/Harness",
-            exclude: [
-                "Resources",
-                "App/README.md",
-                "Domain/README.md",
-                "Application/README.md",
-                "Adapters/README.md",
-                "UI/README.md",
-            ]
+            exclude: ["Resources"]
         ),
         .testTarget(
             name: "HarnessTests",
