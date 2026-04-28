@@ -16,6 +16,11 @@
 //!   non-empty `api_key` will do) so the configured/unconfigured
 //!   semantics match the production path. A warning is logged at
 //!   startup.
+//! * `HARNESS_FAKE_PROVIDER_DELAY_MS=<n>` — when the fake is active,
+//!   inject `n` milliseconds of `tokio::time::sleep` between every
+//!   emitted `ChatEvent`. Lets live e2e tests drive cancellation
+//!   mid-stream without racing the synchronous default. See
+//!   [`crate::testing::ENV_FAKE_PROVIDER_DELAY_MS`].
 //!
 //! Behavior tests can either:
 //! * drive `seed_builtin_sandbox_templates` directly (still public), or

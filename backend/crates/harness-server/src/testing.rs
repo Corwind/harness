@@ -24,9 +24,23 @@
 //!   `MessageStop { stop_reason: ToolUse }`.
 //! * Otherwise emit a single `ContentDelta { text: "Hello from fake
 //!   provider." }` followed by `MessageStop { EndTurn }`.
+//!
+//! ## Pacing
+//!
+//! `HARNESS_FAKE_PROVIDER_DELAY_MS=<n>` (parsed at construction time)
+//! injects a `tokio::time::sleep` of `n` milliseconds between every
+//! emitted `ChatEvent`. Unset / non-numeric / negative → `0` (the fake
+//! is fully synchronous, matching the original T2.1.x behaviour).
+//!
+//! The Swift live-cancellation e2e test
+//! (`ChatViewModelLiveTests.testCancellationLiveAgainstFakeProvider`)
+//! sets this so the orchestrator has a window to observe `cancel()`
+//! between the canned events.
+
+use std::time::Duration;
 
 use async_trait::async_trait;
-use futures::stream::{self, BoxStream};
+use futures::stream::BoxStream;
 use harness_core::{
     chat::{ChatEvent, ChatRequest, StopReason},
     error::ProviderError,
@@ -40,6 +54,9 @@ pub const FAKE_GREETING: &str = "Hello from fake provider.";
 /// Stable id used for the synthetic tool-use call. Must match between
 /// the `tool_use_*` deltas the orchestrator stitches together.
 pub const FAKE_TOOL_USE_ID: &str = "fake_tu_1";
+
+/// Env var that paces the fake provider's chat stream. See module docs.
+pub const ENV_FAKE_PROVIDER_DELAY_MS: &str = "HARNESS_FAKE_PROVIDER_DELAY_MS";
 
 /// Failure-mode injection for tests of the `ProviderError` → HTTP
 /// mapping (T1.followup).
@@ -62,11 +79,21 @@ pub enum FakeFailure {
 #[derive(Debug, Default)]
 pub struct FakeProvider {
     failure: Option<FakeFailure>,
+    /// Inter-event sleep applied to the chat stream. `0` = no delay,
+    /// matching the original synchronous behaviour. Sourced from
+    /// [`ENV_FAKE_PROVIDER_DELAY_MS`] when constructed via
+    /// [`FakeProvider::new`].
+    delay_ms: u64,
 }
 
 impl FakeProvider {
+    /// Production constructor: reads pacing from the env. Used by
+    /// `bootstrap::acquire_app_state` when `HARNESS_FAKE_PROVIDER=1`.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            failure: None,
+            delay_ms: read_delay_env(),
+        }
     }
 
     /// Construct a fake whose every `list_models` / `chat` call returns
@@ -75,6 +102,17 @@ impl FakeProvider {
     pub fn with_failure(failure: FakeFailure) -> Self {
         Self {
             failure: Some(failure),
+            delay_ms: 0,
+        }
+    }
+
+    /// Test-only: explicit pacing (bypasses the env). Used by the
+    /// behaviour tests of [`ENV_FAKE_PROVIDER_DELAY_MS`] itself so they
+    /// stay deterministic regardless of the running process's env.
+    pub fn with_delay_ms(delay_ms: u64) -> Self {
+        Self {
+            failure: None,
+            delay_ms,
         }
     }
 
@@ -91,6 +129,17 @@ impl FakeProvider {
                 message: format!("upstream returned {s}"),
             },
         })
+    }
+}
+
+/// Parse [`ENV_FAKE_PROVIDER_DELAY_MS`] from the process env. Unset,
+/// non-numeric, or out-of-range values fall back to `0` (synchronous).
+/// Made `pub` so behavior tests can pin the parser separately from the
+/// stream pacing.
+pub fn read_delay_env() -> u64 {
+    match std::env::var(ENV_FAKE_PROVIDER_DELAY_MS) {
+        Ok(s) => s.parse::<u64>().unwrap_or(0),
+        Err(_) => 0,
     }
 }
 
@@ -138,7 +187,20 @@ impl LlmProvider for FakeProvider {
             return Err(err);
         }
         let events = decide_turn(&request);
-        Ok(Box::pin(stream::iter(events)))
+        let delay = Duration::from_millis(self.delay_ms);
+        // async-stream lets us yield events with awaits between them.
+        // The orchestrator's chat consumer races `cancel.cancelled()`
+        // against `stream.next()`, so a non-zero delay opens a window
+        // for cancellation between events.
+        let s = async_stream::stream! {
+            for ev in events {
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
+                }
+                yield ev;
+            }
+        };
+        Ok(Box::pin(s))
     }
 }
 
