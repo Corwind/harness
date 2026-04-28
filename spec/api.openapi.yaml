@@ -1,7 +1,893 @@
-# Placeholder — to be authored by Phase 0 track B.
-# See PLAN.md §5.2 for the target endpoints.
+# Harness Local API — OpenAPI 3.1 contract
+#
+# Validation:
+#   python3 -c "import yaml; yaml.safe_load(open('spec/api.openapi.yaml'))"
+#   # Optional stricter lint:
+#   #   npx -y @redocly/cli lint spec/api.openapi.yaml
+#
+# This file is the source of truth for the HTTP surface exposed by the Rust
+# sidecar to the SwiftUI frontend. Streaming chat tokens and tool events are
+# delivered separately via Server-Sent Events; their payload schemas live in
+# spec/events.md.
 openapi: 3.1.0
 info:
   title: Harness Local API
-  version: 0.0.0-placeholder
-paths: {}
+  version: 0.1.0
+  summary: Local loopback HTTP API exposed by the Harness Rust sidecar.
+  description: |
+    The Harness backend binds to `127.0.0.1` on a random port and prints
+    `{"port":N,"token":"..."}` to stdout on startup. Every request must carry
+    that token in the `X-Harness-Token` header. Non-loopback connections are
+    refused. All routes are prefixed with `/v1`.
+
+    Server-streamed events (`GET /v1/runs/{run_id}/events`) use SSE
+    (`text/event-stream`); the event-name and payload schema for each event are
+    documented in `spec/events.md` and are not duplicated here.
+
+servers:
+  - url: http://127.0.0.1:{port}
+    description: Local loopback. The actual port is announced on stdout at startup.
+    variables:
+      port:
+        default: "8080"
+        description: Port chosen by the OS at sidecar startup.
+
+security:
+  - harnessToken: []
+
+tags:
+  - name: health
+  - name: providers
+  - name: conversations
+  - name: messages
+  - name: runs
+  - name: sandbox-templates
+  - name: settings
+
+paths:
+  /v1/health:
+    get:
+      tags: [health]
+      operationId: getHealth
+      summary: Liveness probe.
+      security: []
+      responses:
+        "200":
+          description: Service is up.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+              examples:
+                ok:
+                  value: { status: "ok", version: "0.1.0" }
+
+  /v1/providers:
+    get:
+      tags: [providers]
+      operationId: listProviders
+      summary: List registered LLM providers and their capabilities.
+      responses:
+        "200":
+          description: Providers list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [providers]
+                properties:
+                  providers:
+                    type: array
+                    items: { $ref: "#/components/schemas/Provider" }
+              examples:
+                claudeOnly:
+                  value:
+                    providers:
+                      - id: claude
+                        display_name: Anthropic Claude
+                        configured: true
+                        capabilities:
+                          streaming: true
+                          tools: true
+                          vision: true
+                          system_prompt: true
+                          max_context_tokens: 200000
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/providers/{id}/models:
+    parameters:
+      - $ref: "#/components/parameters/ProviderId"
+    get:
+      tags: [providers]
+      operationId: listProviderModels
+      summary: List models exposed by a configured provider.
+      responses:
+        "200":
+          description: Models for the provider.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [models]
+                properties:
+                  models:
+                    type: array
+                    items: { $ref: "#/components/schemas/Model" }
+              examples:
+                claude:
+                  value:
+                    models:
+                      - id: claude-sonnet-4-6
+                        display_name: Claude Sonnet 4.6
+                        context_window: 200000
+                        supports_tools: true
+                        supports_vision: true
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Provider is registered but not configured (no API key).
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/providers/{id}/config:
+    parameters:
+      - $ref: "#/components/parameters/ProviderId"
+    post:
+      tags: [providers]
+      operationId: upsertProviderConfig
+      summary: Create or replace the configuration for a provider.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProviderConfig" }
+            examples:
+              claude:
+                value:
+                  api_key: sk-ant-...
+                  base_url: null
+                  extra: {}
+      responses:
+        "200":
+          description: Configuration accepted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderConfigSummary" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/conversations:
+    get:
+      tags: [conversations]
+      operationId: listConversations
+      summary: List conversations, newest first.
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - in: query
+          name: cursor
+          schema: { type: string }
+          description: Opaque pagination cursor returned by a previous call.
+      responses:
+        "200":
+          description: A page of conversations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [conversations]
+                properties:
+                  conversations:
+                    type: array
+                    items: { $ref: "#/components/schemas/Conversation" }
+                  next_cursor:
+                    type: [string, "null"]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [conversations]
+      operationId: createConversation
+      summary: Create a new conversation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateConversationRequest" }
+            examples:
+              minimal:
+                value:
+                  provider_id: claude
+                  model: claude-sonnet-4-6
+              titled:
+                value:
+                  provider_id: claude
+                  model: claude-sonnet-4-6
+                  title: "Refactor harness-core"
+                  sandbox_template_id: tpl_strict_readonly
+      responses:
+        "201":
+          description: Conversation created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Conversation" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/conversations/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ConversationId"
+    get:
+      tags: [conversations]
+      operationId: getConversation
+      summary: Fetch a conversation by id.
+      responses:
+        "200":
+          description: Conversation found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Conversation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [conversations]
+      operationId: patchConversation
+      summary: Update mutable fields on a conversation (title, model, sandbox).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PatchConversationRequest" }
+            examples:
+              rename:
+                value: { title: "New title" }
+              attachSandbox:
+                value: { sandbox_template_id: tpl_strict_readonly }
+              detachSandbox:
+                value: { sandbox_template_id: null }
+      responses:
+        "200":
+          description: Updated conversation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Conversation" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [conversations]
+      operationId: deleteConversation
+      summary: Delete a conversation and its messages.
+      responses:
+        "204":
+          description: Deleted.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/conversations/{id}/messages:
+    parameters:
+      - $ref: "#/components/parameters/ConversationId"
+    get:
+      tags: [messages]
+      operationId: listMessages
+      summary: List persisted messages in ordinal order.
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500, default: 200 }
+        - in: query
+          name: after_ordinal
+          schema: { type: integer, minimum: 0 }
+          description: Return only messages with an ordinal strictly greater than this.
+      responses:
+        "200":
+          description: Messages in ascending ordinal order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [messages]
+                properties:
+                  messages:
+                    type: array
+                    items: { $ref: "#/components/schemas/Message" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [messages]
+      operationId: postMessage
+      summary: Append a user turn and start a model run.
+      description: |
+        Persists the user message and begins a run. The response returns a
+        `run_id` immediately; consume the assistant turn via
+        `GET /v1/runs/{run_id}/events`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PostMessageRequest" }
+            examples:
+              text:
+                value:
+                  content:
+                    - type: text
+                      text: "Summarise the design plan."
+      responses:
+        "202":
+          description: Run accepted; subscribe to the SSE stream to consume it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunHandle" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Conversation already has an active run.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/runs/{run_id}/events:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    get:
+      tags: [runs]
+      operationId: streamRunEvents
+      summary: Server-Sent Events stream for a run.
+      description: |
+        Returns `text/event-stream`. Each SSE message has an `event:` name and a
+        JSON `data:` payload. The full event catalogue (run lifecycle, chat
+        deltas, tool execution) is documented in `spec/events.md`.
+
+        Re-subscribing with `Last-Event-ID` is permitted while the run is still
+        live; events are replayed from the given id.
+      parameters:
+        - in: header
+          name: Last-Event-ID
+          schema: { type: string }
+          required: false
+      responses:
+        "200":
+          description: SSE stream (see `spec/events.md` for event schemas).
+          headers:
+            Cache-Control:
+              schema: { type: string, const: "no-store" }
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  An SSE stream. Each event is `event: <name>\n` followed by
+                  `data: <json>\n\n`. See `spec/events.md` for names and
+                  payloads.
+              examples:
+                streamSnippet:
+                  summary: Three events from a typical run.
+                  value: |
+                    event: run.start
+                    id: 1
+                    data: {"run_id":"run_01HX","conversation_id":"conv_01HX"}
+
+                    event: message.start
+                    id: 2
+                    data: {"id":"msg_01HX"}
+
+                    event: content.delta
+                    id: 3
+                    data: {"text":"Hello"}
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "410":
+          description: Run has finished and its event log has expired.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/runs/{run_id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    post:
+      tags: [runs]
+      operationId: cancelRun
+      summary: Request cancellation of an in-flight run.
+      responses:
+        "202":
+          description: Cancellation accepted; an `error` or `message.stop` SSE event will follow.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Run already terminated.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/sandbox-templates:
+    get:
+      tags: [sandbox-templates]
+      operationId: listSandboxTemplates
+      summary: List sandbox templates (built-in + user-defined).
+      responses:
+        "200":
+          description: Templates list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [templates]
+                properties:
+                  templates:
+                    type: array
+                    items: { $ref: "#/components/schemas/SandboxTemplate" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [sandbox-templates]
+      operationId: createSandboxTemplate
+      summary: Create a user-defined sandbox template.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateSandboxTemplateRequest" }
+            examples:
+              custom:
+                value:
+                  name: "deny-all-but-tmp"
+                  description: "Read/write only under /tmp."
+                  profile: |
+                    (version 1)
+                    (deny default)
+                    (allow file-read* (subpath "/tmp"))
+                    (allow file-write* (subpath "/tmp"))
+      responses:
+        "201":
+          description: Template created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SandboxTemplate" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: Template name already exists.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: Profile failed `sandbox-exec` validation.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/sandbox-templates/{id}:
+    parameters:
+      - $ref: "#/components/parameters/SandboxTemplateId"
+    get:
+      tags: [sandbox-templates]
+      operationId: getSandboxTemplate
+      summary: Fetch a sandbox template.
+      responses:
+        "200":
+          description: Template.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SandboxTemplate" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [sandbox-templates]
+      operationId: patchSandboxTemplate
+      summary: Update a user-defined sandbox template.
+      description: Built-in templates are immutable; PATCH against them returns 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PatchSandboxTemplateRequest" }
+      responses:
+        "200":
+          description: Updated template.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SandboxTemplate" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Template is built-in and cannot be modified.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: Profile failed `sandbox-exec` validation.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [sandbox-templates]
+      operationId: deleteSandboxTemplate
+      summary: Delete a user-defined sandbox template.
+      description: |
+        Conversations referencing the deleted template have their
+        `sandbox_template_id` nulled (ON DELETE SET NULL).
+      responses:
+        "204":
+          description: Deleted.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Template is built-in and cannot be deleted.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/sandbox-templates/{id}/validate:
+    parameters:
+      - $ref: "#/components/parameters/SandboxTemplateId"
+    post:
+      tags: [sandbox-templates]
+      operationId: validateSandboxTemplate
+      summary: Dry-run a template via `sandbox-exec -f <profile> /usr/bin/true`.
+      responses:
+        "200":
+          description: Profile validates.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [valid]
+                properties:
+                  valid: { type: boolean, const: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: Profile failed validation.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/settings:
+    get:
+      tags: [settings]
+      operationId: getSettings
+      summary: Read user-level settings (theme, defaults, etc.).
+      responses:
+        "200":
+          description: Settings document.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settings" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [settings]
+      operationId: patchSettings
+      summary: Merge a partial settings document.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PatchSettingsRequest" }
+            examples:
+              theme:
+                value: { theme: "dark" }
+      responses:
+        "200":
+          description: Merged settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settings" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+components:
+  securitySchemes:
+    harnessToken:
+      type: apiKey
+      in: header
+      name: X-Harness-Token
+      description: Random per-process session token announced on stdout at startup.
+
+  parameters:
+    ProviderId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, pattern: "^[a-z][a-z0-9_-]{0,63}$" }
+      description: Stable provider identifier (e.g. `claude`, `ollama`).
+    ConversationId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string }
+    SandboxTemplateId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string }
+    RunId:
+      in: path
+      name: run_id
+      required: true
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Request was malformed.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or invalid `X-Harness-Token`.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Resource does not exist.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Health:
+      type: object
+      required: [status, version]
+      properties:
+        status: { type: string, enum: [ok] }
+        version: { type: string, description: "Backend semver." }
+
+    Provider:
+      type: object
+      required: [id, display_name, configured, capabilities]
+      properties:
+        id: { type: string }
+        display_name: { type: string }
+        configured:
+          type: boolean
+          description: Whether this provider has a stored config (e.g. an API key).
+        capabilities: { $ref: "#/components/schemas/ProviderCapabilities" }
+
+    ProviderCapabilities:
+      type: object
+      required: [streaming, tools, vision, system_prompt]
+      properties:
+        streaming: { type: boolean }
+        tools: { type: boolean }
+        vision: { type: boolean }
+        system_prompt: { type: boolean }
+        max_context_tokens: { type: [integer, "null"], minimum: 0 }
+
+    Model:
+      type: object
+      required: [id, display_name]
+      properties:
+        id: { type: string }
+        display_name: { type: string }
+        context_window: { type: [integer, "null"], minimum: 0 }
+        supports_tools: { type: [boolean, "null"] }
+        supports_vision: { type: [boolean, "null"] }
+
+    ProviderConfig:
+      type: object
+      description: |
+        Provider-specific configuration. The `extra` bag is opaque to the API
+        layer and forwarded to the provider adapter. Secrets (e.g. `api_key`)
+        are never returned by GET endpoints.
+      properties:
+        api_key: { type: [string, "null"] }
+        base_url: { type: [string, "null"], format: uri }
+        extra:
+          type: object
+          additionalProperties: true
+
+    ProviderConfigSummary:
+      type: object
+      required: [provider_id, configured, updated_at]
+      properties:
+        provider_id: { type: string }
+        configured: { type: boolean }
+        updated_at: { type: string, format: date-time }
+
+    Conversation:
+      type: object
+      required: [id, title, provider_id, model, created_at, updated_at]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        provider_id: { type: string }
+        model: { type: string }
+        sandbox_template_id:
+          type: [string, "null"]
+          description: Sandbox template attached to this conversation, if any.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateConversationRequest:
+      type: object
+      required: [provider_id, model]
+      properties:
+        provider_id: { type: string }
+        model: { type: string }
+        title: { type: [string, "null"] }
+        sandbox_template_id: { type: [string, "null"] }
+
+    PatchConversationRequest:
+      type: object
+      description: All fields optional; null clears, absent leaves unchanged.
+      properties:
+        title: { type: string }
+        model: { type: string }
+        sandbox_template_id:
+          type: [string, "null"]
+
+    Message:
+      type: object
+      required: [id, conversation_id, role, content, created_at, ordinal]
+      properties:
+        id: { type: string }
+        conversation_id: { type: string }
+        role:
+          type: string
+          enum: [user, assistant, tool, system]
+        content:
+          type: array
+          items: { $ref: "#/components/schemas/MessageContentBlock" }
+        created_at: { type: string, format: date-time }
+        ordinal:
+          type: integer
+          minimum: 0
+          description: Monotonic per-conversation ordering key.
+
+    MessageContentBlock:
+      oneOf:
+        - $ref: "#/components/schemas/TextBlock"
+        - $ref: "#/components/schemas/ToolUseBlock"
+        - $ref: "#/components/schemas/ToolResultBlock"
+        - $ref: "#/components/schemas/ImageBlock"
+      discriminator:
+        propertyName: type
+        mapping:
+          text: "#/components/schemas/TextBlock"
+          tool_use: "#/components/schemas/ToolUseBlock"
+          tool_result: "#/components/schemas/ToolResultBlock"
+          image: "#/components/schemas/ImageBlock"
+
+    TextBlock:
+      type: object
+      required: [type, text]
+      properties:
+        type: { type: string, const: text }
+        text: { type: string }
+
+    ToolUseBlock:
+      type: object
+      required: [type, id, name, input]
+      properties:
+        type: { type: string, const: tool_use }
+        id: { type: string }
+        name: { type: string }
+        input:
+          description: Arbitrary JSON arguments the model passed to the tool.
+          type: object
+          additionalProperties: true
+
+    ToolResultBlock:
+      type: object
+      required: [type, tool_use_id, output]
+      properties:
+        type: { type: string, const: tool_result }
+        tool_use_id: { type: string }
+        output:
+          description: Free-form JSON returned by the tool. Adapters may use {stdout, stderr, exit_code} for ExternalTool, or arbitrary structured data for InProcessTool.
+        is_error: { type: boolean, default: false }
+
+    ImageBlock:
+      type: object
+      required: [type, source]
+      properties:
+        type: { type: string, const: image }
+        source:
+          oneOf:
+            - type: object
+              required: [kind, media_type, data]
+              properties:
+                kind: { type: string, const: base64 }
+                media_type: { type: string, examples: ["image/png", "image/jpeg"] }
+                data: { type: string, contentEncoding: base64 }
+            - type: object
+              required: [kind, url]
+              properties:
+                kind: { type: string, const: url }
+                url: { type: string, format: uri }
+
+    PostMessageRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: array
+          items: { $ref: "#/components/schemas/MessageContentBlock" }
+        max_tokens: { type: [integer, "null"], minimum: 1 }
+        temperature: { type: [number, "null"], minimum: 0, maximum: 2 }
+
+    RunHandle:
+      type: object
+      required: [run_id, conversation_id, message_id]
+      properties:
+        run_id: { type: string }
+        conversation_id: { type: string }
+        message_id:
+          type: string
+          description: Id of the persisted user message that started this run.
+
+    SandboxTemplate:
+      type: object
+      required: [id, name, profile, is_builtin, created_at, updated_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: [string, "null"] }
+        profile:
+          type: string
+          description: Apple SBPL profile text (`(version 1) (deny default) ...`).
+        is_builtin: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateSandboxTemplateRequest:
+      type: object
+      required: [name, profile]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        description: { type: [string, "null"] }
+        profile: { type: string, minLength: 1 }
+
+    PatchSandboxTemplateRequest:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        description: { type: [string, "null"] }
+        profile: { type: string, minLength: 1 }
+
+    Settings:
+      type: object
+      description: |
+        Free-form settings object. Known keys are documented inline; unknown keys
+        round-trip untouched so the UI can stash bag-of-bits state.
+      properties:
+        theme: { type: string, enum: [light, dark, system] }
+        default_provider_id: { type: [string, "null"] }
+        default_model: { type: [string, "null"] }
+        default_sandbox_template_id: { type: [string, "null"] }
+        require_sandbox_for_tools:
+          type: boolean
+          description: When true, conversations without a sandbox template refuse to run external tools (fail-closed).
+          default: true
+      additionalProperties: true
+
+    PatchSettingsRequest:
+      type: object
+      description: Partial settings document; merged into the stored settings.
+      properties:
+        theme: { type: string, enum: [light, dark, system] }
+        default_provider_id: { type: [string, "null"] }
+        default_model: { type: [string, "null"] }
+        default_sandbox_template_id: { type: [string, "null"] }
+        require_sandbox_for_tools: { type: boolean }
+      additionalProperties: true
+
+    Error:
+      type: object
+      description: RFC 7807 problem+json error body.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          description: Stable URI/identifier for the error category (e.g. `about:blank` or `/errors/sandbox-invalid`).
+          default: about:blank
+        title: { type: string }
+        status: { type: integer, minimum: 100, maximum: 599 }
+        detail: { type: string }
+        instance: { type: string, format: uri-reference }
+        code:
+          type: string
+          description: Stable machine-readable error code (e.g. `sandbox.invalid_profile`, `provider.unconfigured`).
