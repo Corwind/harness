@@ -10,7 +10,9 @@
 //!
 //! Module layout mirrors the ports:
 //! * [`provider`] — `LlmProvider` and friends
-//! * [`tool`] — `ExternalTool`, `InProcessTool`, `ToolCommand`
+//! * [`tool`] — `ExternalTool`, `InProcessTool`, `ToolCommand`,
+//!   `ToolRegistry`, `Tool`
+//! * [`run`] — `RunEvent`, `RunStatus`
 //! * [`sandbox`] — `SandboxRunner`, `SandboxTemplate`, `WrappedCommand`
 //! * [`repo`] — repository ports + persisted entity types
 //! * [`secrets`] — `SecretsVault`
@@ -29,6 +31,7 @@ pub mod ids;
 pub mod message;
 pub mod provider;
 pub mod repo;
+pub mod run;
 pub mod sandbox;
 pub mod secrets;
 pub mod tool;
@@ -42,8 +45,10 @@ pub use repo::{
     Conversation, ConversationPatch, ConversationRepo, MessageRepo, NewConversation, NewMessage,
     ProvidersConfigRepo, SandboxTemplateRepo, SettingsRepo, StoredMessage,
 };
+pub use run::{RunEvent, RunStatus};
 pub use sandbox::{SandboxRunner, SandboxTemplate, WrappedCommand};
 pub use secrets::SecretsVault;
 pub use tool::{
-    ExternalTool, InProcessTool, ToolCommand, ToolDefinition, ToolDescriptor, ToolKind,
+    ExternalTool, InProcessTool, Tool, ToolCommand, ToolDefinition, ToolDescriptor, ToolKind,
+    ToolRegistry,
 };

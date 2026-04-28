@@ -75,3 +75,51 @@ pub trait InProcessTool: ToolDescriptor {
     /// Execute the tool and return its result as a JSON value.
     async fn run(&self, input: &serde_json::Value) -> Result<serde_json::Value, ToolError>;
 }
+
+/// Either kind of tool, paired so the registry can hand a single handle
+/// back to the orchestrator without leaking whether sandboxing applies.
+pub enum Tool {
+    External(std::sync::Arc<dyn ExternalTool>),
+    InProcess(std::sync::Arc<dyn InProcessTool>),
+}
+
+impl std::fmt::Debug for Tool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Tool::External(t) => f
+                .debug_struct("Tool::External")
+                .field("name", &t.name())
+                .finish(),
+            Tool::InProcess(t) => f
+                .debug_struct("Tool::InProcess")
+                .field("name", &t.name())
+                .finish(),
+        }
+    }
+}
+
+impl Tool {
+    pub fn name(&self) -> &str {
+        match self {
+            Tool::External(t) => t.name(),
+            Tool::InProcess(t) => t.name(),
+        }
+    }
+
+    pub fn kind(&self) -> ToolKind {
+        match self {
+            Tool::External(_) => ToolKind::External,
+            Tool::InProcess(_) => ToolKind::InProcess,
+        }
+    }
+}
+
+/// Lookup port: name → tool. Adapters (`harness-tools`) implement this;
+/// the orchestrator depends only on this trait.
+pub trait ToolRegistry: Send + Sync + 'static {
+    /// Return the tool registered under `name`, if any.
+    fn get(&self, name: &str) -> Option<Tool>;
+
+    /// All registered tool names.
+    fn names(&self) -> Vec<String>;
+}

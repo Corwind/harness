@@ -19,7 +19,7 @@ let package = Package(
         .target(
             name: "HarnessApp",
             path: "Sources/Harness",
-            exclude: ["Resources"]
+            exclude: ["Resources", "App/HarnessAppMain.swift"]
         ),
         .testTarget(
             name: "HarnessTests",
