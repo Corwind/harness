@@ -33,12 +33,34 @@ public struct HarnessApp: App {
     }
 
     static func resolveProvider() throws -> BackendSessionProvider {
+        let secretsStore = KeychainSecretsStore()
         if let envPath = ProcessInfo.processInfo.environment["HARNESS_BACKEND_PATH"],
            !envPath.isEmpty {
-            return SidecarLauncher(executableURL: URL(fileURLWithPath: envPath))
+            return SidecarLauncher(
+                executableURL: URL(fileURLWithPath: envPath),
+                environment: ProcessInfo.processInfo.environment,
+                secretsStore: secretsStore
+            )
+        }
+        // Sidecar lives next to the app's main executable in Contents/MacOS/
+        // (placed there by scripts/package.sh). Resources/ is checked as a
+        // fallback so older bundle layouts remain bootable.
+        if let mainExe = Bundle.main.executableURL {
+            let candidate = mainExe.deletingLastPathComponent().appendingPathComponent("harness-server")
+            if FileManager.default.isExecutableFile(atPath: candidate.path) {
+                return SidecarLauncher(
+                    executableURL: candidate,
+                    environment: ProcessInfo.processInfo.environment,
+                    secretsStore: secretsStore
+                )
+            }
         }
         if let bundled = Bundle.main.url(forResource: "harness-server", withExtension: nil) {
-            return SidecarLauncher(executableURL: bundled)
+            return SidecarLauncher(
+                executableURL: bundled,
+                environment: ProcessInfo.processInfo.environment,
+                secretsStore: secretsStore
+            )
         }
         throw BackendSessionError.backendNotFound(path: "<HARNESS_BACKEND_PATH unset and no bundled binary>")
     }

@@ -104,6 +104,15 @@ stderr.
 For deterministic e2e tests, set `HARNESS_FAKE_PROVIDER=1` to swap the real
 Claude adapter for a scripted fake.
 
+When the macOS app spawns the sidecar, it auto-derives both env vars: the
+encryption key is generated on first launch and stored in the macOS keychain
+under service `com.harness.encryption-key`, and the DB path defaults to
+`~/Library/Application Support/Harness/harness.sqlite`. Setting
+`HARNESS_DB_KEY_HEX` and/or `HARNESS_DB_PATH` in the parent process's env
+overrides these defaults — the keychain is only consulted when the env var
+is absent. This is how `LiveBackendHarness` and other tests bypass the
+keychain entirely.
+
 ## License
 
 Dual-licensed under the [MIT License](https://opensource.org/licenses/MIT) and

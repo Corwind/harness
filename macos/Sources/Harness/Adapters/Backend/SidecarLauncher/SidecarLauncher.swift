@@ -22,9 +22,16 @@ enum HandshakeParser {
 }
 
 public final class SidecarLauncher: BackendSessionProvider, @unchecked Sendable {
+    public static let keyServiceIdDefault = "com.harness.encryption-key"
+    static let envKeyHex = "HARNESS_DB_KEY_HEX"
+    static let envDbPath = "HARNESS_DB_PATH"
+
     private let executableURL: URL
     private let arguments: [String]
     private let environment: [String: String]?
+    private let secretsStore: SecretsStore?
+    private let dbPathOverride: URL?
+    private let keyServiceId: String
     private let handshakeTimeout: TimeInterval
 
     private let lock = NSLock()
@@ -35,11 +42,17 @@ public final class SidecarLauncher: BackendSessionProvider, @unchecked Sendable 
         executableURL: URL,
         arguments: [String] = [],
         environment: [String: String]? = nil,
+        secretsStore: SecretsStore? = nil,
+        dbPathOverride: URL? = nil,
+        keyServiceId: String = SidecarLauncher.keyServiceIdDefault,
         handshakeTimeout: TimeInterval = 5.0
     ) {
         self.executableURL = executableURL
         self.arguments = arguments
         self.environment = environment
+        self.secretsStore = secretsStore
+        self.dbPathOverride = dbPathOverride
+        self.keyServiceId = keyServiceId
         self.handshakeTimeout = handshakeTimeout
     }
 
@@ -59,11 +72,13 @@ public final class SidecarLauncher: BackendSessionProvider, @unchecked Sendable 
             throw BackendSessionError.backendNotFound(path: executableURL.path)
         }
 
+        let resolvedEnv = try await resolveEnvironment()
+
         let proc = Process()
         proc.executableURL = executableURL
         proc.arguments = arguments
-        if let environment {
-            proc.environment = environment
+        if let resolvedEnv {
+            proc.environment = resolvedEnv
         }
 
         let stdoutPipe = Pipe()
@@ -105,6 +120,70 @@ public final class SidecarLauncher: BackendSessionProvider, @unchecked Sendable 
         lock.unlock()
 
         return parsed
+    }
+
+    /// Builds the env passed to the spawned backend. Caller-supplied values
+    /// always win; the SecretsStore (if any) only fills missing slots — this
+    /// is what lets dev/test callers override `HARNESS_DB_KEY_HEX` and
+    /// `HARNESS_DB_PATH` without ever touching the user's keychain.
+    private func resolveEnvironment() async throws -> [String: String]? {
+        // If the caller hasn't supplied an environment AND we have nothing to
+        // inject, leave it nil so the child inherits the parent env (existing
+        // behavior).
+        if environment == nil && secretsStore == nil && dbPathOverride == nil {
+            return nil
+        }
+        var env = environment ?? [:]
+
+        // Only consult the secrets store when the caller hasn't pre-set the
+        // key. Pairs naturally with the dev override path: callers that set
+        // HARNESS_DB_KEY_HEX skip the keychain entirely.
+        let consultedSecretsStore: Bool
+        if env[Self.envKeyHex] == nil, let secretsStore {
+            let bytes = try await secretsStore.storeOrFetchKey(forService: keyServiceId)
+            env[Self.envKeyHex] = bytes.hexEncodedString()
+            consultedSecretsStore = true
+        } else {
+            consultedSecretsStore = false
+        }
+
+        if env[Self.envDbPath] == nil {
+            if let dbPathOverride {
+                try Self.ensureParentDirectory(of: dbPathOverride)
+                env[Self.envDbPath] = dbPathOverride.path
+            } else if consultedSecretsStore {
+                // We're on the production path (keychain-managed key, no
+                // explicit overrides). Default the DB to Application Support.
+                let path = Self.defaultDatabasePath()
+                try Self.ensureParentDirectory(of: path)
+                env[Self.envDbPath] = path.path
+            }
+        }
+
+        return env
+    }
+
+    static func defaultDatabasePath() -> URL {
+        let fm = FileManager.default
+        let base: URL
+        if let appSupport = try? fm.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        ) {
+            base = appSupport.appendingPathComponent("Harness", isDirectory: true)
+        } else {
+            base = URL(fileURLWithPath: NSHomeDirectory())
+                .appendingPathComponent("Library/Application Support/Harness", isDirectory: true)
+        }
+        return base.appendingPathComponent("harness.sqlite")
+    }
+
+    private static func ensureParentDirectory(of file: URL) throws {
+        let parent = file.deletingLastPathComponent()
+        try FileManager.default.createDirectory(
+            at: parent, withIntermediateDirectories: true)
     }
 
     /// Internal hook for behavior tests: spawns the child without awaiting the handshake.
