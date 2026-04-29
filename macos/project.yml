@@ -50,3 +50,29 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.harness.Harness
         PRODUCT_NAME: Harness
         CODE_SIGN_ENTITLEMENTS: Sources/Harness/Resources/Harness.entitlements
+
+  HarnessUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: UITests/HarnessUITests
+    dependencies:
+      - target: Harness
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.harness.HarnessUITests
+        TEST_TARGET_NAME: Harness
+        # The XCUITest runner launches a separate process; signing it
+        # ad-hoc keeps `make uitest` working without a paid identity.
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+
+schemes:
+  HarnessUITests:
+    build:
+      targets:
+        Harness: all
+        HarnessUITests: all
+    test:
+      targets:
+        - HarnessUITests
