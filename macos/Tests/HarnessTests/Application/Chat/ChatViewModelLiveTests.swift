@@ -52,23 +52,9 @@ final class ChatViewModelLiveTests: XCTestCase {
     }
 
     func testCancellationPropagatesToServerAndStopsStream() async throws {
-        // The cancellation logic is asserted comprehensively in-process
-        // by `ChatViewModelTests.testCancelMidStreamProducesCancelledStatusAndStopsUpdates`.
-        // The full live path through URLSession + SSE has a separate
-        // teardown latency issue that's being investigated (the test
-        // body's assertions hold but the run waited ~16 minutes for the
-        // SSE to free its iterator after cancel — likely a URLSession /
-        // AsyncThrowingStream teardown bug we don't want to debug under
-        // a normal CI run). Until that's resolved, gate behind an env
-        // var so opt-in slow runs can validate the path without bloating
-        // CI wall-clock.
-        guard ProcessInfo.processInfo.environment["HARNESS_E2E_CANCEL_LIVE"] == "1" else {
-            throw XCTSkip(
-                "live cancellation test gated on HARNESS_E2E_CANCEL_LIVE=1 — slow path " +
-                "(~16 min) due to URLSession/AsyncThrowingStream teardown latency under " +
-                "investigation; in-process cancellation coverage is in ChatViewModelTests."
-            )
-        }
+        // 50 ms / event opens a clean cancellation window between the
+        // fake's three scripted events. SSEReader's prompt teardown
+        // (commit cf48631) keeps this under ~500 ms wall-clock.
         let harness = try await spawnHarnessOrSkip(extraEnv: [
             "HARNESS_FAKE_PROVIDER_DELAY_MS": "50",
         ])
