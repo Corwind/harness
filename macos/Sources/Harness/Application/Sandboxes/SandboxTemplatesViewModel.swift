@@ -14,6 +14,21 @@ public enum SandboxCreateError: Error, Equatable, Sendable {
     }
 }
 
+/// Top-of-tab banner state for failures on the templates list call.
+public enum SandboxBannerError: Equatable, Sendable {
+    case transport
+    case server(status: Int)
+
+    public var userMessage: String {
+        switch self {
+        case .transport:
+            return "Couldn't reach the backend."
+        case .server(let status):
+            return "Backend error (\(status))."
+        }
+    }
+}
+
 @Observable
 @MainActor
 public final class SandboxTemplatesViewModel {
@@ -21,11 +36,16 @@ public final class SandboxTemplatesViewModel {
 
     public private(set) var templates: [SandboxTemplate] = []
     public private(set) var loadError: String?
+    public private(set) var bannerError: SandboxBannerError?
     public private(set) var createError: SandboxCreateError?
     public private(set) var validationResults: [String: ValidateSandboxResult] = [:]
     public private(set) var isValidating: Set<String> = []
     public private(set) var isCreating: Bool = false
     public private(set) var isLoading: Bool = false
+    /// True after the first load attempt completes. Empty-state CTAs
+    /// only render once we've hit the gateway at least once, so they
+    /// don't flash on first paint.
+    public private(set) var hasLoaded: Bool = false
 
     public init(gateway: SandboxTemplatesGateway) {
         self.gateway = gateway
@@ -34,12 +54,37 @@ public final class SandboxTemplatesViewModel {
     public func load() async {
         loadError = nil
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            hasLoaded = true
+        }
         do {
             templates = try await gateway.list()
+            bannerError = nil
         } catch {
+            bannerError = Self.bannerError(for: error)
             loadError = String(describing: error)
         }
+    }
+
+    public var builtinTemplates: [SandboxTemplate] {
+        templates.filter(\.isBuiltin)
+    }
+
+    public var customTemplates: [SandboxTemplate] {
+        templates.filter { !$0.isBuiltin }
+    }
+
+    public var customTemplateCount: Int { customTemplates.count }
+
+    /// Drives the "Custom templates: 0 — + New template" CTA on the
+    /// Sandboxes tab. Only true once `load` has completed and there are
+    /// no custom templates *and* no banner error masking the empty list.
+    public var shouldShowCustomEmptyState: Bool {
+        hasLoaded
+            && !isLoading
+            && bannerError == nil
+            && customTemplates.isEmpty
     }
 
     public func canEdit(_ template: SandboxTemplate) -> Bool { !template.isBuiltin }
@@ -113,5 +158,17 @@ public final class SandboxTemplatesViewModel {
                 stderr: "Validation request failed: \(String(describing: error))"
             )
         }
+    }
+
+    private static func bannerError(for error: Error) -> SandboxBannerError {
+        if let backend = error as? BackendError {
+            switch backend {
+            case .transport, .decoding, .encoding, .malformedResponse, .malformedEvent, .cancelled:
+                return .transport
+            case .httpStatus(let status, _):
+                return .server(status: status)
+            }
+        }
+        return .transport
     }
 }

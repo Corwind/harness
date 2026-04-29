@@ -7,22 +7,43 @@ struct ProvidersTab: View {
     @State private var baseUrlDraft: String = ""
 
     var body: some View {
-        HSplitView {
-            providerList
-                .frame(minWidth: 180)
-            providerDetail
-                .frame(minWidth: 360)
+        VStack(spacing: 0) {
+            if let banner = viewModel.providersBannerError {
+                BannerView(
+                    message: banner.userMessage,
+                    theme: viewModel.currentTheme,
+                    isLoading: viewModel.isLoadingProviders,
+                    retry: { Task { await viewModel.refreshProviders() } }
+                )
+            }
+            HSplitView {
+                providerList
+                    .frame(minWidth: 200)
+                providerDetail
+                    .frame(minWidth: 360)
+            }
         }
         .background(viewModel.currentTheme.background)
         .foregroundStyle(viewModel.currentTheme.text)
         .task {
-            if viewModel.providersList.isEmpty {
+            if !viewModel.hasLoadedProviders {
                 await viewModel.refreshProviders()
             }
         }
     }
 
+    @ViewBuilder
     private var providerList: some View {
+        if viewModel.shouldShowAddProviderEmptyState {
+            emptyProviderCTA
+        } else if viewModel.isLoadingProviders && viewModel.providersList.isEmpty {
+            loadingSkeleton
+        } else {
+            populatedList
+        }
+    }
+
+    private var populatedList: some View {
         List(selection: $selectedProviderId) {
             Section("Providers") {
                 ForEach(viewModel.providersList, id: \.id) { provider in
@@ -46,6 +67,43 @@ struct ProvidersTab: View {
             }
         }
         .listStyle(.sidebar)
+    }
+
+    private var loadingSkeleton: some View {
+        VStack(spacing: 8) {
+            Spacer()
+            ProgressView()
+            Text("Loading providers…")
+                .font(.caption)
+                .foregroundStyle(viewModel.currentTheme.mutedText)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var emptyProviderCTA: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: "key")
+                .font(.system(size: 36))
+                .foregroundStyle(viewModel.currentTheme.mutedText)
+            Text("Add an API key to get started")
+                .font(.headline)
+                .foregroundStyle(viewModel.currentTheme.text)
+            Text("Provider list is empty. Once you configure a provider it'll appear here.")
+                .font(.caption)
+                .foregroundStyle(viewModel.currentTheme.mutedText)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+            Button {
+                Task { await viewModel.refreshProviders() }
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
@@ -85,6 +143,14 @@ struct ProvidersTab: View {
                 Spacer()
             }
             .padding()
+        } else if viewModel.shouldShowAddProviderEmptyState {
+            VStack {
+                Spacer()
+                Text("Configure a provider on the left to start chatting.")
+                    .foregroundStyle(viewModel.currentTheme.mutedText)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
         } else {
             VStack {
                 Spacer()
@@ -94,5 +160,34 @@ struct ProvidersTab: View {
             }
             .frame(maxWidth: .infinity)
         }
+    }
+}
+
+/// Shared retryable banner used at the top of Settings tabs when the
+/// underlying gateway call failed.
+struct BannerView: View {
+    let message: String
+    let theme: Theme
+    let isLoading: Bool
+    let retry: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(theme.error)
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(theme.text)
+            Spacer()
+            if isLoading {
+                ProgressView().controlSize(.small)
+            } else {
+                Button("Retry", action: retry)
+                    .buttonStyle(.borderless)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(theme.error.opacity(0.08))
     }
 }

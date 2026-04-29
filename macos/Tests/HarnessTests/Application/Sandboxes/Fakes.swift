@@ -6,6 +6,15 @@ final class FakeSandboxTemplatesGateway: SandboxTemplatesGateway, @unchecked Sen
     private var templates: [SandboxTemplate]
     var validateResult: Result<ValidateSandboxResult, Error> = .success(.init(valid: true))
 
+    /// When non-nil, `list()` returns this result instead of the in-memory
+    /// `templates` (lets tests inject failures such as `BackendError.transport`).
+    var listResult: Result<[SandboxTemplate], Error>?
+
+    /// Optional async hook invoked at the start of `list()` before the
+    /// result is produced. Tests use this to gate the call so they can
+    /// observe the in-flight loading state.
+    var beforeList: (@Sendable () async -> Void)?
+
     private(set) var listCallCount: Int = 0
     private(set) var createCallCount: Int = 0
     private(set) var lastCreate: CreateSandboxTemplateRequest?
@@ -21,9 +30,20 @@ final class FakeSandboxTemplatesGateway: SandboxTemplatesGateway, @unchecked Sen
     }
 
     func list() async throws -> [SandboxTemplate] {
+        let hook = lockedRead { self.beforeList }
+        await hook?()
+        return try lockedRead {
+            self.listCallCount += 1
+            if let listResult = self.listResult {
+                return listResult
+            }
+            return .success(self.templates)
+        }.get()
+    }
+
+    private func lockedRead<T>(_ block: () -> T) -> T {
         lock.lock(); defer { lock.unlock() }
-        listCallCount += 1
-        return templates
+        return block()
     }
 
     func create(_ request: CreateSandboxTemplateRequest) async throws -> SandboxTemplate {

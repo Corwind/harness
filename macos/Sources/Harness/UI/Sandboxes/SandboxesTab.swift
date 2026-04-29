@@ -10,29 +10,92 @@ struct SandboxesTab: View {
     @State private var isCreating: Bool = false
 
     var body: some View {
-        HSplitView {
-            sidebar
-                .frame(minWidth: 220)
-            detail
-                .frame(minWidth: 420)
+        VStack(spacing: 0) {
+            if let banner = viewModel.bannerError {
+                bannerView(banner)
+            }
+            HSplitView {
+                sidebar
+                    .frame(minWidth: 220)
+                detail
+                    .frame(minWidth: 420)
+            }
         }
         .background(theme.background)
         .foregroundStyle(theme.text)
         .task {
-            if viewModel.templates.isEmpty {
+            if !viewModel.hasLoaded {
                 await viewModel.load()
             }
         }
     }
 
+    private func bannerView(_ banner: SandboxBannerError) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(theme.error)
+            Text(banner.userMessage)
+                .font(.callout)
+                .foregroundStyle(theme.text)
+            Spacer()
+            if viewModel.isLoading {
+                ProgressView().controlSize(.small)
+            } else {
+                Button("Retry") {
+                    Task { await viewModel.load() }
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(theme.error.opacity(0.08))
+    }
+
+    @ViewBuilder
     private var sidebar: some View {
+        if viewModel.isLoading && viewModel.templates.isEmpty {
+            VStack(spacing: 8) {
+                Spacer()
+                ProgressView()
+                Text("Loading sandbox templates…")
+                    .font(.caption)
+                    .foregroundStyle(theme.mutedText)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+        } else {
+            populatedSidebar
+        }
+    }
+
+    private var populatedSidebar: some View {
         VStack(spacing: 0) {
             List(selection: $selectedId) {
                 Section("Built-in") {
-                    ForEach(viewModel.templates.filter(\.isBuiltin), id: \.id) { row($0) }
+                    ForEach(viewModel.builtinTemplates, id: \.id) { row($0) }
                 }
-                Section("Custom") {
-                    ForEach(viewModel.templates.filter { !$0.isBuiltin }, id: \.id) { row($0) }
+                Section {
+                    if viewModel.shouldShowCustomEmptyState {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Custom templates: 0")
+                                .font(.caption)
+                                .foregroundStyle(theme.mutedText)
+                            Text("Click + New template to add one.")
+                                .font(.caption2)
+                                .foregroundStyle(theme.mutedText)
+                        }
+                        .padding(.vertical, 4)
+                    } else {
+                        ForEach(viewModel.customTemplates, id: \.id) { row($0) }
+                    }
+                } header: {
+                    HStack {
+                        Text("Custom")
+                        Spacer()
+                        Text("\(viewModel.customTemplateCount)")
+                            .foregroundStyle(theme.mutedText)
+                    }
                 }
             }
             .listStyle(.sidebar)
@@ -42,19 +105,28 @@ struct SandboxesTab: View {
                     isCreating = true
                     selectedId = nil
                 } label: {
-                    Label("New", systemImage: "plus")
+                    Label("New template", systemImage: "plus")
                 }
                 Spacer()
                 if let id = selectedId,
-                   let target = viewModel.templates.first(where: { $0.id == id }),
-                   viewModel.canDelete(target) {
-                    Button(role: .destructive) {
-                        Task {
-                            await viewModel.deleteTemplate(id: id)
-                            selectedId = nil
+                   let target = viewModel.templates.first(where: { $0.id == id }) {
+                    if viewModel.canDelete(target) {
+                        Button(role: .destructive) {
+                            Task {
+                                await viewModel.deleteTemplate(id: id)
+                                selectedId = nil
+                            }
+                        } label: {
+                            Label("Delete", systemImage: "trash")
                         }
-                    } label: {
-                        Label("Delete", systemImage: "trash")
+                    } else {
+                        Button {
+                            // no-op: built-ins are immutable
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                        .disabled(true)
+                        .help("Built-in templates cannot be deleted.")
                     }
                 }
             }
