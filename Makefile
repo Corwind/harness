@@ -25,10 +25,10 @@ backend:
 	cd backend && cargo run -p harness-server
 
 app:
-	@command -v xcodegen >/dev/null 2>&1 || { echo "xcodegen not found. Install with: brew install xcodegen"; exit 1; }
-	cd macos && xcodegen generate
-	cd macos && xcodebuild -scheme Harness -configuration Debug build
-	open macos/build/Debug/Harness.app
+	@command -v xcodegen >/dev/null 2>&1 || { echo "xcodegen not found. Install with: brew install xcodegen (or set XCODEGEN=/path/to/xcodegen)"; exit 1; }
+	./scripts/package.sh
+	./scripts/test-app.sh
+	open dist/Harness.app
 
 fmt:
 	cd backend && cargo fmt --all

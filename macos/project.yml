@@ -1,6 +1,6 @@
 # xcodegen project descriptor for the Harness macOS .app target.
-# Run `xcodegen generate` from this directory to (re)materialise Harness.xcodeproj.
-# Authored by Phase 1 / track F; this is a starting skeleton.
+# Run `xcodegen generate` from this directory to (re)materialise Harness.xcodeproj,
+# or invoke `scripts/build-app.sh` to do that as part of the packaging pipeline.
 
 name: Harness
 options:
@@ -13,6 +13,12 @@ settings:
     SWIFT_VERSION: "5.9"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     ENABLE_HARDENED_RUNTIME: YES
+    # Local-dev signing defaults: an unsigned/ad-hoc build runs on the
+    # developer's machine without a paid identity. scripts/sign.sh
+    # re-signs with HARNESS_SIGN_IDENTITY when shipping.
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
 
 targets:
   Harness:
@@ -22,15 +28,25 @@ targets:
       - path: Sources/Harness
         excludes:
           - "**/*.md"
+          - "Resources/Info.plist"
+          - "Resources/Harness.entitlements"
     resources:
-      - Sources/Harness/Resources
+      - path: Sources/Harness/Resources
+        excludes:
+          - "Info.plist"
+          - "Harness.entitlements"
     info:
       path: Sources/Harness/Resources/Info.plist
       properties:
         CFBundleName: Harness
+        CFBundleDisplayName: Harness
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
         LSMinimumSystemVersion: "14.0"
         NSHighResolutionCapable: true
+        NSPrincipalClass: NSApplication
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.harness.Harness
-        CODE_SIGN_STYLE: Automatic
+        PRODUCT_NAME: Harness
+        CODE_SIGN_ENTITLEMENTS: Sources/Harness/Resources/Harness.entitlements
