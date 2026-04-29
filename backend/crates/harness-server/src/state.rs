@@ -18,7 +18,9 @@ use harness_core::{
 };
 use harness_orchestrator::Orchestrator;
 
-use crate::{auth::SessionToken, providers::ProviderRegistry, runs::RunRegistry};
+use crate::{
+    auth::SessionToken, diagnostics::LogRing, providers::ProviderRegistry, runs::RunRegistry,
+};
 
 /// Container for every port a request handler may need.
 #[derive(Clone)]
@@ -40,6 +42,9 @@ pub struct AppState {
     pub tools: Arc<dyn ToolRegistry>,
     pub orchestrator: Arc<Orchestrator>,
     pub runs: Arc<RunRegistry>,
+
+    // Diagnostics
+    pub logs: Arc<LogRing>,
 }
 
 impl std::fmt::Debug for AppState {

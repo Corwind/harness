@@ -54,10 +54,15 @@ struct RootView: View {
 
     @ViewBuilder
     private var detailPane: some View {
-        if let activeId = tabsVM.activeConversationId {
-            ChatView(viewModel: tabsVM.chatViewModel(for: activeId))
-                .id(activeId)
-        } else if tabsVM.isLoading {
+        if let activeId = tabsVM.activeConversationId,
+           let conversation = tabsVM.conversations.first(where: { $0.id == activeId }) {
+            ChatView(
+                viewModel: tabsVM.chatViewModel(for: activeId),
+                activeSandboxName: sandboxName(for: conversation.sandboxTemplateId),
+                actions: chatActions(for: conversation)
+            )
+            .id(activeId)
+        } else if tabsVM.isLoading || !tabsVM.didLoadOnce {
             VStack(spacing: 12) {
                 ProgressView()
                 Text("Loading conversations…")
@@ -67,10 +72,53 @@ struct RootView: View {
         } else {
             EmptyStatePane(
                 error: tabsVM.error ?? providersError,
-                hasProviders: !providers.isEmpty
+                hasProviders: !providers.isEmpty,
+                onRetry: { Task { await tabsVM.reload() } }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    private func sandboxName(for templateId: String?) -> String? {
+        guard let templateId else { return nil }
+        return tabsVM.sandboxTemplates.first(where: { $0.id == templateId })?.name
+    }
+
+    private func chatActions(for conversation: Conversation) -> ChatViewActions {
+        ChatViewActions(
+            onOpenProvidersSettings: openProvidersSettings,
+            onOpenSandboxesSettings: { templateId in
+                openSandboxesSettings(highlight: templateId)
+            },
+            onChooseSandbox: {
+                // T2.5 exposes a sandbox picker in the conversation
+                // header; until that picker accepts an external trigger,
+                // route the user to Settings → Sandboxes for now.
+                openSandboxesSettings(highlight: conversation.sandboxTemplateId)
+            }
+        )
+    }
+
+    private func openProvidersSettings() {
+        // SwiftUI Settings scene is presented via the system menu / ⌘,;
+        // post a notification the app's settings host can observe to
+        // pre-select the Providers tab. Default Settings open is fine
+        // until that hook lands.
+        NotificationCenter.default.post(
+            name: .harnessOpenSettings,
+            object: nil,
+            userInfo: ["tab": "providers"]
+        )
+    }
+
+    private func openSandboxesSettings(highlight templateId: String?) {
+        var info: [String: Any] = ["tab": "sandboxes"]
+        if let templateId { info["highlight"] = templateId }
+        NotificationCenter.default.post(
+            name: .harnessOpenSettings,
+            object: nil,
+            userInfo: info
+        )
     }
 
     private func loadProvidersAndModels() async {
@@ -96,13 +144,14 @@ struct RootView: View {
 private struct EmptyStatePane: View {
     let error: ChatError?
     let hasProviders: Bool
+    let onRetry: () -> Void
 
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: "bubble.left.and.bubble.right")
+            Image(systemName: error == nil ? "bubble.left.and.bubble.right" : "exclamationmark.triangle.fill")
                 .font(.largeTitle)
-                .foregroundStyle(.secondary)
-            Text("No conversation selected")
+                .foregroundStyle(error == nil ? Color.secondary : Color.red)
+            Text(error == nil ? "No conversation selected" : "Couldn't load conversations")
                 .font(.headline)
             if let error {
                 Text(error.message)
@@ -110,13 +159,17 @@ private struct EmptyStatePane: View {
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
                     .textSelection(.enabled)
+                if error.actions.canRetry {
+                    Button("Try again", action: onRetry)
+                        .controlSize(.small)
+                }
             } else if !hasProviders {
                 Text("Configure a provider in Settings to start a conversation.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             } else {
-                Text("Click + in the sidebar to start a new conversation.")
+                Text("No conversations yet. Press ⌘N to create one.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -124,4 +177,8 @@ private struct EmptyStatePane: View {
         }
         .padding(24)
     }
+}
+
+extension Notification.Name {
+    static let harnessOpenSettings = Notification.Name("HarnessOpenSettings")
 }

@@ -1,16 +1,44 @@
 import SwiftUI
 
+/// Optional callbacks the chat view can fire when an error banner offers
+/// the user an action (Retry, Open Settings, Choose sandbox). The host
+/// (RootView, ConversationTabsView) wires these to navigation / sheet
+/// presentation. Default no-ops keep the view self-contained for previews.
+public struct ChatViewActions {
+    public var onOpenProvidersSettings: (() -> Void)?
+    public var onOpenSandboxesSettings: ((_ templateId: String?) -> Void)?
+    public var onChooseSandbox: (() -> Void)?
+
+    public init(
+        onOpenProvidersSettings: (() -> Void)? = nil,
+        onOpenSandboxesSettings: ((_ templateId: String?) -> Void)? = nil,
+        onChooseSandbox: (() -> Void)? = nil
+    ) {
+        self.onOpenProvidersSettings = onOpenProvidersSettings
+        self.onOpenSandboxesSettings = onOpenSandboxesSettings
+        self.onChooseSandbox = onChooseSandbox
+    }
+}
+
 public struct ChatView: View {
     @State private var viewModel: ChatViewModel
     @State private var draft: String = ""
+    private let actions: ChatViewActions
+    private let activeSandboxName: String?
 
-    public init(viewModel: ChatViewModel) {
+    public init(
+        viewModel: ChatViewModel,
+        activeSandboxName: String? = nil,
+        actions: ChatViewActions = ChatViewActions()
+    ) {
         _viewModel = State(initialValue: viewModel)
+        self.activeSandboxName = activeSandboxName
+        self.actions = actions
     }
 
     public var body: some View {
         VStack(spacing: 0) {
-            messageList
+            content
             Divider()
             if let error = viewModel.error {
                 errorBanner(error)
@@ -23,6 +51,58 @@ public struct ChatView: View {
             )
         }
         .frame(minWidth: 480, minHeight: 360)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if viewModel.isLoadingHistory && viewModel.messages.isEmpty {
+            loadingState
+        } else if viewModel.isEmpty {
+            emptyState
+        } else {
+            messageList
+        }
+    }
+
+    @ViewBuilder
+    private var loadingState: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+            Text("Loading conversation…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+            Text("Start the conversation")
+                .font(.headline)
+            sandboxSummary
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
+    }
+
+    @ViewBuilder
+    private var sandboxSummary: some View {
+        if let name = activeSandboxName {
+            Label("Sandbox: \(name)", systemImage: "lock.shield.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            Label(
+                "No sandbox attached — external tools will refuse to run.",
+                systemImage: "exclamationmark.triangle.fill"
+            )
+            .font(.caption)
+            .foregroundStyle(.orange)
+        }
     }
 
     @ViewBuilder
@@ -64,19 +144,79 @@ public struct ChatView: View {
         }
     }
 
+    @ViewBuilder
     private func errorBanner(_ error: ChatError) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "exclamationmark.triangle.fill")
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: errorIcon(for: error))
                 .foregroundStyle(.red)
-            Text(error.message)
-                .font(.caption)
-                .foregroundStyle(.red)
-                .textSelection(.enabled)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(error.message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+                errorActionButtons(error)
+            }
             Spacer()
+            Button {
+                viewModel.clearError()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss")
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
         .background(Color.red.opacity(0.08))
+    }
+
+    private func errorIcon(for error: ChatError) -> String {
+        switch error.kind {
+        case .transport: return "wifi.exclamationmark"
+        case .sessionExpired, .forbidden: return "lock.slash"
+        case .providerUnauthorized, .providerUnconfigured: return "key"
+        case .providerRateLimited: return "hourglass"
+        case .providerUnavailable: return "exclamationmark.triangle.fill"
+        case .sandboxRequired, .sandboxInvalidProfile: return "lock.shield"
+        case .toolTimeout: return "clock.badge.exclamationmark"
+        case .toolSpawnFailed: return "xmark.octagon.fill"
+        case .server, .other: return "exclamationmark.triangle.fill"
+        }
+    }
+
+    @ViewBuilder
+    private func errorActionButtons(_ error: ChatError) -> some View {
+        HStack(spacing: 8) {
+            if error.actions.canRetry {
+                Button("Retry") {
+                    Task { await viewModel.retry() }
+                }
+                .controlSize(.small)
+            }
+            if error.actions.canOpenSettings {
+                switch error.actions.settingsTab {
+                case .providers:
+                    Button("Open Settings") {
+                        actions.onOpenProvidersSettings?()
+                    }
+                    .controlSize(.small)
+                case .sandboxes(let templateId):
+                    Button("Open Sandboxes") {
+                        actions.onOpenSandboxesSettings?(templateId)
+                    }
+                    .controlSize(.small)
+                case .none:
+                    EmptyView()
+                }
+            }
+            if error.actions.canChooseSandbox {
+                Button("Choose sandbox") {
+                    actions.onChooseSandbox?()
+                }
+                .controlSize(.small)
+            }
+        }
     }
 
     private func send() {

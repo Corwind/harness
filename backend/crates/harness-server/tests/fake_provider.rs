@@ -22,7 +22,7 @@ use harness_orchestrator::Orchestrator;
 use harness_server::{
     bind_loopback,
     bootstrap::{acquire_app_state_with, fake_provider_enabled, ENV_FAKE_PROVIDER},
-    build_router, serve, AppState, FakeProvider, ProviderRegistry, SessionToken,
+    build_router, serve, AppState, FakeProvider, LogRing, ProviderRegistry, SessionToken,
 };
 use harness_storage::{Db, Secret};
 use harness_tools::default_registry;
@@ -70,6 +70,7 @@ impl FakeProviderApp {
             sandbox_runner,
             tools,
             orchestrator,
+            Arc::new(LogRing::new()),
         )
         .await
         .expect("acquire state");

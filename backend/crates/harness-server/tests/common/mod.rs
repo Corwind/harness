@@ -28,7 +28,9 @@ use harness_core::{
     SandboxError, SandboxRunner, SandboxTemplate, ToolCommand, ToolRegistry, WrappedCommand,
 };
 use harness_orchestrator::Orchestrator;
-use harness_server::{bootstrap::acquire_app_state_with, AppState, ProviderRegistry, SessionToken};
+use harness_server::{
+    bootstrap::acquire_app_state_with, AppState, LogRing, ProviderRegistry, SessionToken,
+};
 use harness_storage::{Db, Secret};
 use harness_tools::default_registry;
 use tempfile::TempDir;
@@ -95,6 +97,7 @@ impl TestApp {
             sandbox_runner,
             tools,
             orchestrator,
+            Arc::new(LogRing::new()),
         )
         .await
         .expect("acquire app state");
@@ -131,6 +134,7 @@ impl TestApp {
             runner,
             tools,
             orchestrator,
+            Arc::new(LogRing::new()),
         )
         .await
         .expect("acquire app state");

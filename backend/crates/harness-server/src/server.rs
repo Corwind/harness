@@ -44,6 +44,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::messages::router())
         .merge(routes::runs::router())
         .merge(routes::settings::router())
+        .merge(routes::diagnostics::router())
         .with_state(state)
         .layer(middleware::from_fn_with_state(token, require_token))
 }

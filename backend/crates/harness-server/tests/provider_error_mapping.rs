@@ -19,7 +19,7 @@ use harness_core::{LlmProvider, SandboxRunner, ToolRegistry};
 use harness_orchestrator::Orchestrator;
 use harness_server::{
     bind_loopback, bootstrap::acquire_app_state_with, build_router, serve, AppState, FakeFailure,
-    FakeProvider, ProviderRegistry, SessionToken,
+    FakeProvider, LogRing, ProviderRegistry, SessionToken,
 };
 use harness_storage::{Db, Secret};
 use harness_tools::default_registry;
@@ -63,6 +63,7 @@ async fn boot(provider: Arc<FakeProvider>) -> App {
         sandbox_runner,
         tools,
         orchestrator,
+        Arc::new(LogRing::new()),
     )
     .await
     .expect("acquire state");

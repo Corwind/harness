@@ -17,6 +17,25 @@ public final class ConversationTabsViewModel {
     public private(set) var error: ChatError? = nil
     public private(set) var isLoading: Bool = false
     public private(set) var sandboxTemplates: [SandboxTemplate] = []
+    public private(set) var didLoadOnce: Bool = false
+
+    /// Reachable when the gateway returned an empty list AND we've
+    /// completed at least one load. Distinct from "loading" (no data
+    /// yet) and "errored" (error has a value).
+    public var isEmpty: Bool {
+        didLoadOnce && conversations.isEmpty && error == nil
+    }
+
+    public func clearError() {
+        error = nil
+    }
+
+    /// Reload after an error or for a manual refresh. Same as `load()`
+    /// but renamed for the view's "Try again" affordance.
+    public func reload() async {
+        error = nil
+        await load()
+    }
 
     private let conversationGateway: ConversationGateway
     private let messageGateway: MessageGateway
@@ -45,7 +64,10 @@ public final class ConversationTabsViewModel {
     /// is none currently active.
     public func load() async {
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            didLoadOnce = true
+        }
         async let conversationsResult = loadConversations()
         async let templatesResult = loadSandboxTemplates()
         await conversationsResult

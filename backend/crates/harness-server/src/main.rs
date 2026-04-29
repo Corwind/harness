@@ -14,12 +14,15 @@
 
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
-use harness_server::{bind_loopback, build_router, serve, AppState, Handshake, SessionToken};
+use harness_server::{
+    bind_loopback, build_router, serve, AppState, Handshake, LogRing, LogRingLayer, SessionToken,
+};
 use harness_storage::{Db, Secret};
 use tokio::signal::unix::{signal, SignalKind};
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 const ENV_DB_PATH: &str = "HARNESS_DB_PATH";
 const ENV_DB_KEY_HEX: &str = "HARNESS_DB_KEY_HEX";
@@ -43,12 +46,20 @@ async fn main() -> anyhow::Result<()> {
         stdout.flush().context("flush handshake")?;
     }
 
-    // 4. Logs to stderr only — never stdout.
+    // 4. Logs to stderr (unchanged) AND to an in-memory ring that the
+    //    Settings UI tails via `/v1/diagnostics/logs`. The two layers
+    //    are composed inside a single `Registry` so every event lands
+    //    in both sinks.
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
+    let logs = Arc::new(LogRing::new());
+    let stderr_layer = tracing_subscriber::fmt::layer()
         .with_writer(std::io::stderr)
-        .with_target(false)
+        .with_target(false);
+    let ring_layer = LogRingLayer::new(logs.clone());
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(stderr_layer)
+        .with(ring_layer)
         .init();
 
     tracing::info!(port = port, "harness-server listening on loopback");
@@ -56,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
     // 5. Open DB and build app state. The Swift parent supplies both the
     //    DB path and the at-rest encryption key; refusing to start without
     //    them keeps the threat model honest.
-    let state = acquire_state(token).await?;
+    let state = acquire_state(token, logs).await?;
 
     // 5b. Spawn the run-registry reaper. Detached for the lifetime of
     //    the process; aborted implicitly on shutdown via tokio runtime.
@@ -69,13 +80,13 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn acquire_state(token: SessionToken) -> anyhow::Result<AppState> {
+async fn acquire_state(token: SessionToken, logs: Arc<LogRing>) -> anyhow::Result<AppState> {
     let db_path = std::env::var(ENV_DB_PATH)
         .map(PathBuf::from)
         .map_err(|_| anyhow!("{ENV_DB_PATH} must be set to the SQLite file path"))?;
 
     let key_hex = std::env::var(ENV_DB_KEY_HEX)
-        .map_err(|_| anyhow!("{ENV_DB_KEY_HEX} must be set to a 64-char hex key"))?;
+        .map_err(|_| anyhow!("{ENV_DB_KEY_HEX} must be exactly 64 hex characters"))?;
     let secret = Secret::from_hex(&key_hex)
         .ok_or_else(|| anyhow!("{ENV_DB_KEY_HEX} must be exactly 64 hex characters"))?;
 
@@ -83,7 +94,7 @@ async fn acquire_state(token: SessionToken) -> anyhow::Result<AppState> {
         .await
         .with_context(|| format!("open SQLite at {}", db_path.display()))?;
 
-    harness_server::bootstrap::acquire_app_state(db, token)
+    harness_server::bootstrap::acquire_app_state(db, token, logs)
         .await
         .context("acquire app state")
 }

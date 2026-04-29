@@ -41,8 +41,8 @@ use harness_storage::{
 use harness_tools::default_registry;
 
 use crate::{
-    auth::SessionToken, providers::ProviderRegistry, runs::RunRegistry, state::AppState,
-    testing::FakeProvider,
+    auth::SessionToken, diagnostics::LogRing, providers::ProviderRegistry, runs::RunRegistry,
+    state::AppState, testing::FakeProvider,
 };
 
 /// Env var that swaps the production Claude provider for the
@@ -68,7 +68,15 @@ pub async fn seed_builtin_sandbox_templates(
 /// semantics still apply — operators (or Swift e2e tests) must POST a
 /// config to `/v1/providers/claude/config` before models / runs work,
 /// which keeps this seam consistent with the real-provider path.
-pub async fn acquire_app_state(db: Db, token: SessionToken) -> Result<AppState, anyhow::Error> {
+///
+/// `logs` is the diagnostics ring shared with the tracing subscriber
+/// installed in `main.rs`; both halves must reference the same `Arc`
+/// so what's logged is what `/v1/diagnostics/logs` returns.
+pub async fn acquire_app_state(
+    db: Db,
+    token: SessionToken,
+    logs: Arc<LogRing>,
+) -> Result<AppState, anyhow::Error> {
     let provider: Arc<dyn LlmProvider> = if fake_provider_enabled() {
         tracing::warn!(
             env = ENV_FAKE_PROVIDER,
@@ -88,7 +96,16 @@ pub async fn acquire_app_state(db: Db, token: SessionToken) -> Result<AppState, 
         tools.clone(),
     ));
 
-    acquire_app_state_with(db, token, providers, sandbox_runner, tools, orchestrator).await
+    acquire_app_state_with(
+        db,
+        token,
+        providers,
+        sandbox_runner,
+        tools,
+        orchestrator,
+        logs,
+    )
+    .await
 }
 
 /// Returns `true` when the env var [`ENV_FAKE_PROVIDER`] is set to
@@ -99,6 +116,9 @@ pub fn fake_provider_enabled() -> bool {
 
 /// Build an [`AppState`] from a pre-built provider registry / runner /
 /// tools / orchestrator. Used by tests that want fakes.
+///
+/// `logs` is the diagnostics ring; tests usually pass
+/// `Arc::new(LogRing::new())` if they don't care about the contents.
 pub async fn acquire_app_state_with(
     db: Db,
     token: SessionToken,
@@ -106,6 +126,7 @@ pub async fn acquire_app_state_with(
     sandbox_runner: Arc<dyn SandboxRunner>,
     tools: Arc<dyn ToolRegistry>,
     orchestrator: Arc<Orchestrator>,
+    logs: Arc<LogRing>,
 ) -> Result<AppState, anyhow::Error> {
     let sandbox_templates = SqliteSandboxTemplateRepo::new(db.clone());
     let _ = seed_builtin_sandbox_templates(&sandbox_templates).await?;
@@ -129,5 +150,6 @@ pub async fn acquire_app_state_with(
         tools,
         orchestrator,
         runs,
+        logs,
     })
 }

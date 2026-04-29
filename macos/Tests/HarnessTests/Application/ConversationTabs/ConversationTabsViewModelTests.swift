@@ -3,6 +3,69 @@ import XCTest
 
 @MainActor
 final class ConversationTabsViewModelTests: XCTestCase {
+    func testIsEmptyTrueAfterLoadWithNoConversations() async {
+        let conversations = TabsTestFakeConversationGateway(seeded: [])
+        let vm = makeViewModel(conversationGateway: conversations)
+
+        XCTAssertFalse(vm.isEmpty, "must not be empty before first load")
+        XCTAssertFalse(vm.didLoadOnce)
+
+        await vm.load()
+
+        XCTAssertTrue(vm.didLoadOnce)
+        XCTAssertTrue(vm.isEmpty)
+        XCTAssertTrue(vm.conversations.isEmpty)
+        XCTAssertNil(vm.error)
+    }
+
+    func testIsLoadingFlagSetDuringLoad() async {
+        let conversations = TabsTestFakeConversationGateway(seeded: [])
+        let vm = makeViewModel(conversationGateway: conversations)
+        XCTAssertFalse(vm.isLoading)
+
+        let task = Task { @MainActor in await vm.load() }
+        await task.value
+        XCTAssertFalse(vm.isLoading, "must reset after load completes")
+    }
+
+    func testIsEmptyFalseWhileErrorPresent() async {
+        let conversations = TabsTestFakeConversationGateway(seeded: [])
+        conversations.listError = BackendError.transport("offline")
+        let vm = makeViewModel(conversationGateway: conversations)
+
+        await vm.load()
+
+        XCTAssertNotNil(vm.error)
+        XCTAssertFalse(vm.isEmpty, "an errored load is not the same as an empty list")
+    }
+
+    func testReloadClearsErrorAndRefetches() async {
+        let conversations = TabsTestFakeConversationGateway(seeded: [])
+        conversations.listError = BackendError.transport("offline")
+        let vm = makeViewModel(conversationGateway: conversations)
+        await vm.load()
+        XCTAssertNotNil(vm.error)
+
+        // Recover the gateway and reload.
+        conversations.listError = nil
+        conversations.appendSeeded(makeConversation(id: "c1", title: "first"))
+        await vm.reload()
+
+        XCTAssertNil(vm.error)
+        XCTAssertEqual(vm.conversations.map(\.id), ["c1"])
+    }
+
+    func testTransportErrorFromGatewayMapsToTypedKind() async {
+        let conversations = TabsTestFakeConversationGateway(seeded: [])
+        conversations.listError = BackendError.transport("offline")
+        let vm = makeViewModel(conversationGateway: conversations)
+
+        await vm.load()
+
+        XCTAssertEqual(vm.error?.kind, .transport)
+        XCTAssertEqual(vm.error?.actions.canRetry, true)
+    }
+
     func testLoadPopulatesSidebarFromGatewayAndSelectsFirst() async {
         let conversations = TabsTestFakeConversationGateway(seeded: [
             makeConversation(id: "c1", title: "first"),
@@ -306,14 +369,24 @@ final class TabsTestFakeConversationGateway: ConversationGateway, @unchecked Sen
     public private(set) var created: [CreateConversationRequest] = []
     public private(set) var patches: [PatchCall] = []
     public private(set) var deleted: [String] = []
+    public var listError: Error?
 
     init(seeded: [Conversation]) {
         self.seeded = seeded
     }
 
-    func list(limit: Int?, cursor: String?) async throws -> ConversationsPage {
+    func appendSeeded(_ conversation: Conversation) {
         lock.lock(); defer { lock.unlock() }
-        return ConversationsPage(conversations: seeded, nextCursor: nil)
+        seeded.append(conversation)
+    }
+
+    func list(limit: Int?, cursor: String?) async throws -> ConversationsPage {
+        lock.lock()
+        let err = listError
+        let snapshot = seeded
+        lock.unlock()
+        if let err { throw err }
+        return ConversationsPage(conversations: snapshot, nextCursor: nil)
     }
 
     func create(_ request: CreateConversationRequest) async throws -> Conversation {

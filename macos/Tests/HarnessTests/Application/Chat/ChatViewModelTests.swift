@@ -171,7 +171,15 @@ final class ChatViewModelTests: XCTestCase {
         XCTAssertEqual(vm.runStatus, .errored)
         XCTAssertFalse(vm.isStreaming)
         XCTAssertEqual(vm.error?.code, "provider.rate_limited")
-        XCTAssertEqual(vm.error?.message, "429")
+        if case .providerRateLimited = vm.error?.kind {
+            // expected
+        } else {
+            XCTFail("expected .providerRateLimited kind, got \(String(describing: vm.error?.kind))")
+        }
+        XCTAssertTrue(
+            vm.error?.message.contains("Rate-limited") ?? false,
+            "expected user-readable rate-limit message; got \(String(describing: vm.error?.message))"
+        )
         XCTAssertEqual(vm.messages.last?.role, .assistant)
         XCTAssertEqual(vm.messages.last?.text, "before-error", "previously streamed content is preserved")
         XCTAssertEqual(vm.messages.last?.status, .errored)
@@ -200,6 +208,147 @@ final class ChatViewModelTests: XCTestCase {
         XCTAssertEqual(vm.error?.code, "network")
         XCTAssertEqual(vm.messages.first?.status, .errored)
         XCTAssertFalse(vm.isStreaming)
+    }
+
+    func testIsEmptyAfterHistoryLoadWithNoMessages() async throws {
+        let runs = FakeRunGateway(script: [])
+        let messages = FakeMessageGateway()
+        let vm = ChatViewModel(runGateway: runs, messageGateway: messages, conversationId: "c1")
+
+        XCTAssertFalse(vm.isEmpty, "should not be empty before history loads")
+
+        await vm.loadHistory()
+
+        XCTAssertTrue(vm.isEmpty, "empty after a successful zero-message load")
+        XCTAssertFalse(vm.isLoadingHistory)
+    }
+
+    func testIsLoadingHistoryFlagSetDuringFetch() async throws {
+        let runs = FakeRunGateway(script: [])
+        let messages = FakeMessageGateway()
+        let vm = ChatViewModel(runGateway: runs, messageGateway: messages, conversationId: "c1")
+
+        XCTAssertFalse(vm.isLoadingHistory)
+        let loadTask = Task { @MainActor in await vm.loadHistory() }
+        await loadTask.value
+        XCTAssertFalse(vm.isLoadingHistory, "flag must reset after load completes")
+    }
+
+    func testIsEmptyFalseDuringStreamingEvenWithNoMessages() async throws {
+        let runs = FakeRunGateway(script: [
+            .gate("hold"),
+        ])
+        let messages = FakeMessageGateway(nextRunId: "r-empty")
+        let vm = ChatViewModel(runGateway: runs, messageGateway: messages, conversationId: "c1")
+
+        let sendTask = Task { @MainActor in await vm.send("hi") }
+        // After send pumps, streaming starts; isEmpty must be false even
+        // before the assistant message arrives.
+        await Task.yield()
+        await Task.yield()
+        XCTAssertFalse(vm.isEmpty, "isEmpty must be false while streaming")
+        runs.releaseGate(named: "hold")
+        await sendTask.value
+    }
+
+    func testClearErrorResetsBanner() async throws {
+        let runs = FakeRunGateway(script: [])
+        let messages = FakeMessageGateway()
+        messages.postError = BackendError.transport("offline")
+        let vm = ChatViewModel(runGateway: runs, messageGateway: messages, conversationId: "c1")
+
+        await vm.send("hi")
+        XCTAssertNotNil(vm.error)
+
+        vm.clearError()
+        XCTAssertNil(vm.error)
+    }
+
+    func testRetryResendsLastUserMessage() async throws {
+        let runs = FakeRunGateway(script: [
+            .event(.runStart(.init(runId: "r-retry", conversationId: "c1", startedAt: "t"))),
+            .event(.messageStart(.init(id: "m-retry"))),
+            .event(.contentDelta(.init(text: "ok"))),
+            .event(.messageStop(.init(stopReason: .endTurn, usage: nil))),
+            .event(.runEnd(.init(runId: "r-retry", status: .completed, endedAt: "t"))),
+        ])
+        let messages = FakeMessageGateway(nextRunId: "r-retry")
+        // First post fails; second post (retry) succeeds.
+        messages.postError = BackendError.transport("flaky")
+        let vm = ChatViewModel(runGateway: runs, messageGateway: messages, conversationId: "c1")
+
+        await vm.send("the question")
+        XCTAssertNotNil(vm.error)
+
+        // Clear the post error before retry so the gateway succeeds this
+        // time. The view-model must remember the last user message text.
+        messages.postError = nil
+        await vm.retry()
+
+        XCTAssertEqual(messages.posted.count, 2)
+        let secondPostText: String? = {
+            guard let block = messages.posted.last?.request.content.first,
+                  case .text(let t) = block else { return nil }
+            return t.text
+        }()
+        XCTAssertEqual(secondPostText, "the question")
+        XCTAssertEqual(vm.runStatus, .completed)
+    }
+
+    func testRetryWithNoPriorMessageIsNoOp() async throws {
+        let runs = FakeRunGateway(script: [])
+        let messages = FakeMessageGateway()
+        let vm = ChatViewModel(runGateway: runs, messageGateway: messages, conversationId: "c1")
+
+        await vm.retry()
+
+        XCTAssertTrue(messages.posted.isEmpty)
+        XCTAssertNil(vm.error)
+    }
+
+    func testTransportErrorOnPostExposesTypedKindAndRetryAction() async throws {
+        let runs = FakeRunGateway(script: [])
+        let messages = FakeMessageGateway()
+        messages.postError = BackendError.transport("URLError(-1004)")
+        let vm = ChatViewModel(runGateway: runs, messageGateway: messages, conversationId: "c1")
+
+        await vm.send("hi")
+
+        XCTAssertEqual(vm.error?.kind, .transport)
+        XCTAssertEqual(vm.error?.actions.canRetry, true)
+    }
+
+    func testProviderUnauthorizedFromSSESurfacesSettingsAction() async throws {
+        let script: [FakeRunGateway.ScriptStep] = [
+            .event(.runStart(.init(runId: "r-pu", conversationId: "c1", startedAt: "t"))),
+            .event(.error(.init(code: "provider.unauthorized", message: "401"))),
+            .event(.runEnd(.init(runId: "r-pu", status: .errored, endedAt: "t"))),
+        ]
+        let runs = FakeRunGateway(script: script)
+        let messages = FakeMessageGateway(nextRunId: "r-pu")
+        let vm = ChatViewModel(runGateway: runs, messageGateway: messages, conversationId: "c1")
+
+        await vm.send("hi")
+
+        XCTAssertEqual(vm.error?.kind, .providerUnauthorized)
+        XCTAssertEqual(vm.error?.actions.canOpenSettings, true)
+        XCTAssertEqual(vm.error?.actions.settingsTab, .providers)
+    }
+
+    func testSandboxRequiredFromSSEExposesChooseSandboxAction() async throws {
+        let script: [FakeRunGateway.ScriptStep] = [
+            .event(.runStart(.init(runId: "r-sr", conversationId: "c1", startedAt: "t"))),
+            .event(.error(.init(code: "sandbox.required", message: "no template"))),
+            .event(.runEnd(.init(runId: "r-sr", status: .errored, endedAt: "t"))),
+        ]
+        let runs = FakeRunGateway(script: script)
+        let messages = FakeMessageGateway(nextRunId: "r-sr")
+        let vm = ChatViewModel(runGateway: runs, messageGateway: messages, conversationId: "c1")
+
+        await vm.send("run echo")
+
+        XCTAssertEqual(vm.error?.kind, .sandboxRequired)
+        XCTAssertEqual(vm.error?.actions.canChooseSandbox, true)
     }
 
     func testLoadHistoryHydratesMessagesFromDomain() async throws {

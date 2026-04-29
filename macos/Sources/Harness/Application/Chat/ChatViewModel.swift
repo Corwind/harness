@@ -5,6 +5,8 @@ import Foundation
 public final class ChatViewModel {
     public private(set) var messages: [ChatMessage] = []
     public private(set) var isStreaming: Bool = false
+    public private(set) var isLoadingHistory: Bool = false
+    public private(set) var didLoadHistoryOnce: Bool = false
     public private(set) var error: ChatError? = nil
     public private(set) var runStatus: RunStatus? = nil
 
@@ -15,6 +17,7 @@ public final class ChatViewModel {
     private var currentRunId: String? = nil
     private var currentAssistantMessageIndex: Int? = nil
     private var streamingTask: Task<Void, Never>? = nil
+    private var lastUserMessageText: String? = nil
 
     public init(
         runGateway: RunGateway,
@@ -26,7 +29,18 @@ public final class ChatViewModel {
         self.conversationId = conversationId
     }
 
+    /// `true` once history has been fetched and the conversation has no
+    /// messages — drives the "Start the conversation." empty state.
+    public var isEmpty: Bool {
+        didLoadHistoryOnce && messages.isEmpty && !isLoadingHistory && !isStreaming
+    }
+
     public func loadHistory() async {
+        isLoadingHistory = true
+        defer {
+            isLoadingHistory = false
+            didLoadHistoryOnce = true
+        }
         do {
             let domainMessages = try await messageGateway.list(
                 conversationId: conversationId,
@@ -39,12 +53,25 @@ public final class ChatViewModel {
         }
     }
 
+    /// Clear the surfaced error so the view can dismiss its banner.
+    public func clearError() {
+        error = nil
+    }
+
+    /// Retry the last user message after a transient failure. No-op if
+    /// no prior message has been sent in this session.
+    public func retry() async {
+        guard let text = lastUserMessageText else { return }
+        await send(text)
+    }
+
     public func send(_ text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isStreaming else { return }
 
         error = nil
         runStatus = nil
+        lastUserMessageText = trimmed
 
         let userMessage = ChatMessage(
             id: "local-user-\(UUID().uuidString)",

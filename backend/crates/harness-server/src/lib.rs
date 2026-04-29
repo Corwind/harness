@@ -21,12 +21,14 @@
 //! * `POST   /v1/runs/:run_id/cancel`
 //! * `GET    /v1/sandbox-templates`               (+ POST/PATCH/DELETE/validate)
 //! * `GET/PATCH /v1/settings`
+//! * `GET    /v1/diagnostics/logs`                 (in-memory ring; T3.5a)
 
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations, rust_2018_idioms)]
 
 pub mod auth;
 pub mod bootstrap;
+pub mod diagnostics;
 pub mod dto;
 pub mod error;
 pub mod handshake;
@@ -39,6 +41,7 @@ pub mod testing;
 
 pub use auth::{SessionToken, TOKEN_HEADER};
 pub use bootstrap::seed_builtin_sandbox_templates;
+pub use diagnostics::{LogLine, LogRing, LogRingLayer};
 pub use handshake::Handshake;
 pub use providers::ProviderRegistry;
 pub use runs::{RunRegistry, RUN_RETENTION};

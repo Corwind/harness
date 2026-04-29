@@ -12,23 +12,7 @@ struct ConversationSidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            List(selection: selectionBinding) {
-                Section {
-                    ForEach(viewModel.conversations, id: \.id) { conversation in
-                        ConversationRow(conversation: conversation)
-                            .tag(conversation.id)
-                            .contextMenu {
-                                Button("Rename") { renamingConversation = conversation }
-                                Button("Delete", role: .destructive) {
-                                    deletingConversation = conversation
-                                }
-                            }
-                    }
-                } header: {
-                    Text("Conversations")
-                }
-            }
-            .listStyle(.sidebar)
+            sidebarContent
 
             Divider()
 
@@ -89,6 +73,68 @@ struct ConversationSidebarView: View {
             }
         } message: { conversation in
             Text("\(conversation.title) and all its messages will be permanently removed.")
+        }
+    }
+
+    @ViewBuilder
+    private var sidebarContent: some View {
+        if viewModel.isLoading && !viewModel.didLoadOnce {
+            VStack(spacing: 8) {
+                ProgressView()
+                Text("Loading conversations…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let error = viewModel.error, viewModel.conversations.isEmpty {
+            VStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                Text(error.message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
+                if error.actions.canRetry {
+                    Button("Try again") {
+                        Task { await viewModel.reload() }
+                    }
+                    .controlSize(.small)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(12)
+        } else if viewModel.isEmpty {
+            VStack(spacing: 8) {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .foregroundStyle(.secondary)
+                Text("No conversations yet")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Press ⌘N to create one")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(12)
+        } else {
+            List(selection: selectionBinding) {
+                Section {
+                    ForEach(viewModel.conversations, id: \.id) { conversation in
+                        ConversationRow(conversation: conversation)
+                            .tag(conversation.id)
+                            .contextMenu {
+                                Button("Rename") { renamingConversation = conversation }
+                                Button("Delete", role: .destructive) {
+                                    deletingConversation = conversation
+                                }
+                            }
+                    }
+                } header: {
+                    Text("Conversations")
+                }
+            }
+            .listStyle(.sidebar)
         }
     }
 
