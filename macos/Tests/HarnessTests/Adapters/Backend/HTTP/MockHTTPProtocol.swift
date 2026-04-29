@@ -12,12 +12,25 @@ final class MockHTTPProtocol: URLProtocol, @unchecked Sendable {
         var bodyChunks: [Data]
         /// Sleep before each chunk (seconds). Defaults to 0.
         var delayBetweenChunks: TimeInterval
+        /// If true, after sending all chunks the protocol does NOT signal
+        /// `urlProtocolDidFinishLoading` and instead holds the connection open
+        /// until `stopLoading` is called by URLSession. Models a real SSE
+        /// server that keeps the half-open stream alive.
+        var holdOpenAfterChunks: Bool
 
-        init(status: Int = 200, headers: [String: String] = [:], body: Data = Data(), bodyChunks: [Data]? = nil, delayBetweenChunks: TimeInterval = 0) {
+        init(
+            status: Int = 200,
+            headers: [String: String] = [:],
+            body: Data = Data(),
+            bodyChunks: [Data]? = nil,
+            delayBetweenChunks: TimeInterval = 0,
+            holdOpenAfterChunks: Bool = false
+        ) {
             self.status = status
             self.headers = headers
             self.bodyChunks = bodyChunks ?? [body]
             self.delayBetweenChunks = delayBetweenChunks
+            self.holdOpenAfterChunks = holdOpenAfterChunks
         }
     }
 
@@ -117,6 +130,7 @@ final class MockHTTPProtocol: URLProtocol, @unchecked Sendable {
 
         let chunks = response.bodyChunks
         let delay = response.delayBetweenChunks
+        let holdOpen = response.holdOpenAfterChunks
         let pathForCancel = request.url?.path ?? ""
         let weakClient = self.client
         let proto = self
@@ -135,6 +149,16 @@ final class MockHTTPProtocol: URLProtocol, @unchecked Sendable {
                 }
                 guard let proto else { return }
                 weakClient?.urlProtocol(proto, didLoad: chunk)
+            }
+            if holdOpen {
+                // Park forever; only stopLoading() (i.e. cancellation) will
+                // wake us. Sleep in 1-second slices so cancellation is observed
+                // promptly.
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+                router.recordCancellation(pathForCancel)
+                return
             }
             if let proto {
                 weakClient?.urlProtocolDidFinishLoading(proto)

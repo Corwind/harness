@@ -256,6 +256,99 @@ final class SSEReaderTests: XCTestCase {
                       "expected URLSessionDataTask to be cancelled mid-stream, got stops=\(router.stoppedPaths) cancels=\(router.cancelledPaths)")
     }
 
+    // Teardown latency: when the consuming Task is cancelled while the server
+    // is still holding the connection open, the consumer must wake up and the
+    // for-await loop must exit promptly. The pre-fix code would hang for
+    // ~16 minutes (URLSession idle/retry timeout chain) because the inner
+    // detached Task never observed consumer cancellation.
+    func test_sse_consumerCancellation_completesPromptly() async throws {
+        // Mock server emits one event then holds the connection open.
+        let firstFrame = """
+        event: run.start
+        id: 1
+        data: {"run_id":"run_hang","conversation_id":"conv_hang","started_at":"2026-04-29T07:30:00Z"}
+
+
+        """.data(using: .utf8)!
+        router.register { _ in
+            .init(
+                status: 200,
+                headers: ["Content-Type": "text/event-stream"],
+                bodyChunks: [firstFrame],
+                holdOpenAfterChunks: true
+            )
+        }
+
+        let adapter = makeAdapter()
+        let stream = try await adapter.events(runId: "run_hang", lastEventId: nil)
+
+        let firstEventReceived = Expectation()
+        let consumer = Task {
+            do {
+                for try await event in stream {
+                    if case .runStart = event {
+                        firstEventReceived.fulfill()
+                    }
+                }
+            } catch {
+                // BackendError.cancelled or CancellationError — acceptable.
+            }
+        }
+
+        try await firstEventReceived.wait(timeout: 2.0)
+        let cancelStart = Date()
+        consumer.cancel()
+        _ = await consumer.value
+        let elapsed = Date().timeIntervalSince(cancelStart)
+
+        XCTAssertLessThan(
+            elapsed, 0.5,
+            "consumer task did not unwind promptly after cancellation; took \(elapsed)s — pre-fix this would hang for minutes"
+        )
+
+        // URLSessionDataTask must have been cancelled by SSEReader.
+        let stopDeadline = Date().addingTimeInterval(2)
+        while router.stoppedPaths.isEmpty && Date() < stopDeadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertTrue(
+            router.stoppedPaths.contains("/v1/runs/run_hang/events"),
+            "expected URLSessionDataTask cancel after consumer cancellation, got stops=\(router.stoppedPaths)"
+        )
+    }
+
+    // Server-initiated close: when the server closes the connection mid-stream
+    // (e.g. backend crash or graceful close after run.end without holding the
+    // socket), the iterator must terminate promptly without waiting on
+    // URLSession's idle timeout.
+    func test_sse_serverInitiatedClose_terminatesPromptly() async throws {
+        let body = """
+        event: run.start
+        id: 1
+        data: {"run_id":"run_srv","conversation_id":"conv_srv","started_at":"2026-04-29T07:30:00Z"}
+
+        event: run.end
+        id: 2
+        data: {"run_id":"run_srv","status":"completed","ended_at":"2026-04-29T07:30:01Z"}
+
+
+        """.data(using: .utf8)!
+        router.register { _ in
+            .init(status: 200, headers: ["Content-Type": "text/event-stream"], body: body)
+        }
+
+        let adapter = makeAdapter()
+        let start = Date()
+        let events = try await collect(stream: adapter.events(runId: "run_srv", lastEventId: nil))
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertEqual(events.count, 2)
+        XCTAssertLessThan(
+            elapsed, 0.5,
+            "server-initiated close did not propagate promptly (took \(elapsed)s)"
+        )
+    }
+
     // Auth header is injected on the SSE request as well.
     func test_sse_requestCarriesAuthHeader() async throws {
         let body = """
@@ -283,4 +376,45 @@ final class SSEReaderTests: XCTestCase {
         for try await e in stream { out.append(e) }
         return out
     }
+}
+
+/// Tiny async one-shot signalling primitive — fulfil once, await once.
+final class Expectation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fulfilled = false
+    private var continuation: CheckedContinuation<Void, Error>?
+
+    func fulfill() {
+        lock.lock()
+        if fulfilled { lock.unlock(); return }
+        fulfilled = true
+        let c = continuation
+        continuation = nil
+        lock.unlock()
+        c?.resume()
+    }
+
+    func wait(timeout seconds: TimeInterval) async throws {
+        let timeoutTask = Task {
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            lock.lock()
+            let c = continuation
+            continuation = nil
+            lock.unlock()
+            c?.resume(throwing: ExpectationTimeout())
+        }
+        defer { timeoutTask.cancel() }
+        try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+            lock.lock()
+            if fulfilled {
+                lock.unlock()
+                c.resume()
+                return
+            }
+            continuation = c
+            lock.unlock()
+        }
+    }
+
+    struct ExpectationTimeout: Error {}
 }
