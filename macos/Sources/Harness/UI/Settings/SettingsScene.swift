@@ -3,15 +3,25 @@ import SwiftUI
 public struct SettingsScene: Scene {
     @Bindable private var viewModel: SettingsViewModel
     private let sandboxes: SandboxTemplatesViewModel?
+    private let diagnostics: DiagnosticsViewModel?
 
-    public init(viewModel: SettingsViewModel, sandboxes: SandboxTemplatesViewModel? = nil) {
+    public init(
+        viewModel: SettingsViewModel,
+        sandboxes: SandboxTemplatesViewModel? = nil,
+        diagnostics: DiagnosticsViewModel? = nil
+    ) {
         self.viewModel = viewModel
         self.sandboxes = sandboxes
+        self.diagnostics = diagnostics
     }
 
     public var body: some Scene {
         SwiftUI.Settings {
-            SettingsRoot(viewModel: viewModel, sandboxes: sandboxes)
+            SettingsRoot(
+                viewModel: viewModel,
+                sandboxes: sandboxes,
+                diagnostics: diagnostics
+            )
                 .frame(minWidth: 720, minHeight: 480)
                 .theme(viewModel.currentTheme)
                 .task {
@@ -39,11 +49,16 @@ private struct SettingsHost: View {
     let state: BootstrapState
     @State private var viewModel: SettingsViewModel?
     @State private var sandboxes: SandboxTemplatesViewModel?
+    @State private var diagnostics: DiagnosticsViewModel?
 
     var body: some View {
         Group {
             if let viewModel {
-                SettingsRoot(viewModel: viewModel, sandboxes: sandboxes)
+                SettingsRoot(
+                    viewModel: viewModel,
+                    sandboxes: sandboxes,
+                    diagnostics: diagnostics
+                )
                     .theme(viewModel.currentTheme)
                     .task {
                         await viewModel.load()
@@ -79,12 +94,16 @@ private struct SettingsHost: View {
         sandboxes = SandboxTemplatesViewModel(
             gateway: SandboxTemplatesGatewayAdapter(client: client)
         )
+        diagnostics = DiagnosticsViewModel(
+            gateway: DiagnosticsGatewayAdapter(client: client)
+        )
     }
 }
 
 struct SettingsRoot: View {
     @Bindable var viewModel: SettingsViewModel
     let sandboxes: SandboxTemplatesViewModel?
+    let diagnostics: DiagnosticsViewModel?
 
     var body: some View {
         TabView {
@@ -98,6 +117,14 @@ struct SettingsRoot: View {
                 SandboxesTab(viewModel: sandboxes)
                     .theme(viewModel.currentTheme)
                     .tabItem { Label("Sandboxes", systemImage: "shield.lefthalf.filled") }
+            }
+            if let diagnostics {
+                DiagnosticsTab(
+                    viewModel: diagnostics,
+                    settings: viewModel
+                )
+                    .theme(viewModel.currentTheme)
+                    .tabItem { Label("Diagnostics", systemImage: "doc.text.magnifyingglass") }
             }
         }
         .background(viewModel.currentTheme.background)
